@@ -1,0 +1,126 @@
+[project]
+name = "ssdp"
+version = "1.0.0"
+description = "SSDP: Stochastic Signed Distance Processes"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "beartype>=0.22.9",
+    "hydra-core>=1.3.2",
+    "ipython<9.13",
+    "jax>=0.10.0",
+    "kornia>=0.8.2",
+    "loguru>=0.7.3",
+    "mitsuba>=3.8.0",
+    "mpi4py>=4.1.2",
+    "nerfstudio==1.1.5",
+    "rich<14",
+    "torch==2.8.0",
+    "torchvision>=0.23.0",
+]
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.6.0",
+]
+ext = [
+    "tinycudann",
+]
+
+[tool.uv]
+default-groups = ["dev"]
+no-build-isolation-package = ["tinycudann"]
+environments = ["platform_machine != 'arm64'"]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu128", marker = "sys_platform == 'linux' or sys_platform == 'win32'" }
+torchvision = { index = "pytorch-cu128", marker = "sys_platform == 'linux' or sys_platform == 'win32'" }
+tinycudann = { git = "https://github.com/NVlabs/tiny-cuda-nn", subdirectory = "bindings/torch", tag = "v2.0" }
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[[tool.uv.dependency-metadata]]
+name = "tinycudann"
+version = "v2.0"
+requires-dist = ["setuptools<81"]
+
+[tool.setuptools]
+packages = ["ssdp"]
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[tool.ruff]
+line-length = 99
+target-version = "py312"
+
+[tool.ruff.lint]
+# https://docs.astral.sh/ruff/linter/#rule-selection
+select = ["E", "F", "UP", "B", "SIM", "I", "W", "N", "ANN"]
+ignore = [
+  "E501",   # Line too long
+  "F722",   # Syntax error in forward annotation: Expected an expression 
+  # ↑ jaxtyping: https://docs.kidger.site/jaxtyping/faq/#flake8-or-ruff-are-throwing-an-error
+  "B020",   # Loop control variable `xxx` overrides iterable it iterates
+  "SIM102", # Use a single `if` statement instead of nested `if` statements
+  "N803",   # Argument name `XXX` should be lowercase
+  "N806",   # Variable `XXX` in function should be lowercase
+  "ANN401", # Dynamically typed expressions (typing.Any) are disallowed in ...
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["nerfstudio", "ssdp"]
+
+[project.scripts]
+ns-train = "ssdp.scripts.train:entrypoint"
+
+[project.entry-points."nerfstudio.method_configs"]
+
+neus = "ssdp.configs.method_configs.neus:config"
+neus-base = "ssdp.configs.method_configs.neus:config_base"
+neus-half = "ssdp.configs.method_configs.neus:config_half"
+neus-double = "ssdp.configs.method_configs.neus:config_double"
+neus-quarter = "ssdp.configs.method_configs.neus:config_quarter"
+neus-quadruple = "ssdp.configs.method_configs.neus:config_quadruple"
+
+neus-facto = "ssdp.configs.method_configs.neus_facto:config"
+neus-facto-base = "ssdp.configs.method_configs.neus_facto:config_base"
+neus-facto-half = "ssdp.configs.method_configs.neus_facto:config_half"
+neus-facto-double = "ssdp.configs.method_configs.neus_facto:config_double"
+neus-facto-quarter = "ssdp.configs.method_configs.neus_facto:config_quarter"
+neus-facto-quadruple = "ssdp.configs.method_configs.neus_facto:config_quadruple"
+
+ssdp = "ssdp.configs.method_configs.ssdp:config"
+ssdp-base = "ssdp.configs.method_configs.ssdp:config_base"
+ssdp-half = "ssdp.configs.method_configs.ssdp:config_half"
+ssdp-double = "ssdp.configs.method_configs.ssdp:config_double"
+ssdp-quarter = "ssdp.configs.method_configs.ssdp:config_quarter"
+ssdp-quadruple = "ssdp.configs.method_configs.ssdp:config_quadruple"
+
+ssdp-facto = "ssdp.configs.method_configs.ssdp_facto:config"
+ssdp-facto-base = "ssdp.configs.method_configs.ssdp_facto:config_base"
+ssdp-facto-half = "ssdp.configs.method_configs.ssdp_facto:config_half"
+ssdp-facto-double = "ssdp.configs.method_configs.ssdp_facto:config_double"
+ssdp-facto-quarter = "ssdp.configs.method_configs.ssdp_facto:config_quarter"
+ssdp-facto-quadruple = "ssdp.configs.method_configs.ssdp_facto:config_quadruple"
+
+oav = "ssdp.configs.method_configs.oav:config"
+oav-base = "ssdp.configs.method_configs.oav:config_base"
+oav-half = "ssdp.configs.method_configs.oav:config_half"
+oav-double = "ssdp.configs.method_configs.oav:config_double"
+oav-quarter = "ssdp.configs.method_configs.oav:config_quarter"
+oav-quadruple = "ssdp.configs.method_configs.oav:config_quadruple"
+
+oav-facto = "ssdp.configs.method_configs.oav_facto:config"
+oav-facto-base = "ssdp.configs.method_configs.oav_facto:config_base"
+oav-facto-half = "ssdp.configs.method_configs.oav_facto:config_half"
+oav-facto-double = "ssdp.configs.method_configs.oav_facto:config_double"
+oav-facto-quarter = "ssdp.configs.method_configs.oav_facto:config_quarter"
+oav-facto-quadruple = "ssdp.configs.method_configs.oav_facto:config_quadruple"
