@@ -46,6 +46,12 @@ def _create_trainer_config(
                     background_model="mlp",
                     nlml_color_loss_mult=1.0,
                     volume_color_loss_mult=0.0,
+                    steps_per_grid_level=round(
+                        NeuSFactoAngeloConfig.steps_per_grid_level * scale_factor
+                    ),
+                    grid_level_warmup_steps=round(
+                        NeuSFactoAngeloConfig.grid_level_warmup_steps * scale_factor
+                    ),
                 ),
             ),
         ),
