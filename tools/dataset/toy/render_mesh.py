@@ -9,10 +9,9 @@ import re
 from pathlib import Path
 
 import loguru
-import matplotlib as mpl
 import mitsuba as mi
 import numpy as np
-import scipy as sp
+import scipy.linalg
 import torch
 import tqdm
 import trimesh
@@ -621,123 +620,53 @@ class MeshRenderer:
     scene_config: SceneConfig = dataclasses.field(
         default_factory=lambda: SceneConfig(
             shape_configs=dict(
-                ground_slab=ShapeConfig(
-                    shape_type=ShapeType.CUBE,
-                    transform_config=TransformConfig(
-                        pose_config=PoseConfig(
-                            origin=(0.0, 0.0, -0.5),
-                            target=(0.0, 0.0, 1.0),
-                            upward=(0.0, 1.0, 0.0),
-                        ),
-                        scale_factors=(100.0, 100.0, 0.01),
-                    ),
+                object=ShapeConfig(
+                    shape_type=ShapeType.PLY,
+                    ply_config=PLYConfig(),
                     material_config=MaterialConfig(
-                        material_type=MaterialType.ROUGHPLASTIC,
-                        diffuse_reflectance=(1.0, 1.0, 1.0),
-                        specular_roughness=0.1,
-                        interior_ior="polypropylene",
-                    ),
-                ),
-                left_slab=ShapeConfig(
-                    shape_type=ShapeType.CUBE,
-                    transform_config=TransformConfig(
-                        pose_config=PoseConfig(
-                            origin=(-0.5, 0.0, 0.0),
-                            target=(-0.5, 0.0, 1.0),
-                            upward=(0.0, 1.0, 0.0),
-                        ),
-                        scale_factors=(0.01, 0.5, 0.5),
-                    ),
-                    material_config=MaterialConfig(
-                        material_type=MaterialType.PLASTIC,
-                        diffuse_reflectance=(0.25, 0.5, 1.0),
-                        interior_ior="polypropylene",
-                    ),
-                ),
-                middle_slab=ShapeConfig(
-                    shape_type=ShapeType.CUBE,
-                    transform_config=TransformConfig(
-                        pose_config=PoseConfig(
-                            origin=(0.0, 0.0, 0.0),
-                            target=(0.0, 0.0, 1.0),
-                            upward=(0.0, 1.0, 0.0),
-                        ),
-                        scale_factors=(0.01, 0.5, 0.5),
-                    ),
-                    material_config=MaterialConfig(
-                        material_type=MaterialType.PLASTIC,
-                        diffuse_reflectance=(1.0, 0.75, 0.25),
-                        interior_ior="polypropylene",
-                    ),
-                ),
-                right_slab=ShapeConfig(
-                    shape_type=ShapeType.CUBE,
-                    transform_config=TransformConfig(
-                        pose_config=PoseConfig(
-                            origin=(0.5, 0.0, 0.0),
-                            target=(0.5, 0.0, 1.0),
-                            upward=(0.0, 1.0, 0.0),
-                        ),
-                        scale_factors=(0.01, 0.5, 0.5),
-                    ),
-                    material_config=MaterialConfig(
-                        material_type=MaterialType.PLASTIC,
-                        diffuse_reflectance=(0.25, 0.5, 1.0),
-                        interior_ior="polypropylene",
+                        material_type=MaterialType.DIFFUSE,
+                        diffuse_reflectance=(0.25, 0.25, 0.25),
                     ),
                 ),
             ),
             emitter_configs=dict(
                 env_light=EmitterConfig(
                     emitter_type=EmitterType.CONSTANT,
-                    radiometry=(1.0, 1.0, 1.0),
-                    scale_factor=0.25,
+                    scale_factor=0.1,
                 ),
                 key_light=ShapeConfig(
                     shape_type=ShapeType.RECTANGLE,
                     transform_config=TransformConfig(
                         pose_config=PoseConfig(
-                            origin=(2.0, -2.0, 2.0),
+                            origin=(1.0, 1.0, 1.0),
                             target=(0.0, 0.0, 0.0),
                             upward=(0.0, 0.0, 1.0),
                         ),
-                        scale_factors=(1.0, 1.0, 1.0),
                     ),
                     emitter_config=EmitterConfig(
                         emitter_type=EmitterType.AREA,
-                        radiometry=(1.0, 0.75, 0.5),
-                        scale_factor=10.0,
+                        scale_factor=16.0,
                     ),
                 ),
-                rim_light=ShapeConfig(
+                fill_light=ShapeConfig(
                     shape_type=ShapeType.RECTANGLE,
                     transform_config=TransformConfig(
                         pose_config=PoseConfig(
-                            origin=(-2.0, 2.0, 2.0),
+                            origin=(-1.0, -1.0, -1.0),
                             target=(0.0, 0.0, 0.0),
                             upward=(0.0, 0.0, 1.0),
                         ),
-                        scale_factors=(1.0, 1.0, 1.0),
                     ),
                     emitter_config=EmitterConfig(
                         emitter_type=EmitterType.AREA,
-                        radiometry=(0.5, 0.75, 1.0),
-                        scale_factor=10.0,
+                        scale_factor=8.0,
                     ),
                 ),
             ),
             sensor_config=SensorConfig(
                 sensor_type=SensorType.PERSPECTIVE,
-                fov_angle=30.0,
-                fov_axis="x",
-                pose_config=PoseConfig(
-                    origin=(0.0, -3.0, 0.0),
-                    target=(0.0, 0.0, 0.0),
-                    upward=(0.0, 0.0, 1.0),
-                ),
                 film_config=FilmConfig(
                     film_type=FilmType.HDRFILM,
-                    image_size=(1000, 1000),
                     filter_config=FilterConfig(
                         filter_type=FilterType.GAUSSIAN,
                     ),
@@ -749,9 +678,11 @@ class MeshRenderer:
             ),
             integrator_config=IntegratorConfig(
                 integrator_type=IntegratorType.PATH,
+                hide_emitters=True,
             ),
         )
     )
+
     scene_aabb: tuple[
         tuple[float, float],
         tuple[float, float],
@@ -761,13 +692,13 @@ class MeshRenderer:
         (-1.0, 1.0),
         (-1.0, 1.0),
     )
-
-    export_mesh: bool = True
     export_meta: bool = True
-    num_azimuth_views: int = 8
-    num_elevation_views: int = 2
+    export_mesh: bool = True
     azimuth_range: tuple[float, float] = (-math.pi, math.pi)
     elevation_range: tuple[float, float] = (0.0, math.pi / 4.0)
+    camera_distance: float = 3.0
+    num_azimuth_views: int = 8
+    num_elevation_views: int = 2
     exported_mesh_regex: str = r"^(?!.*light).*$"
 
     def __call__(self) -> None:
@@ -785,16 +716,15 @@ class MeshRenderer:
 
         scene = self.scene_config.instantiate()
 
-        radius = np.linalg.norm(self.scene_config.sensor_config.pose_config.origin)
         sensors = [
             dataclasses.replace(
                 self.scene_config.sensor_config,
                 pose_config=dataclasses.replace(
                     self.scene_config.sensor_config.pose_config,
                     origin=(
-                        radius * math.cos(elevation) * math.cos(azimuth),
-                        radius * math.cos(elevation) * math.sin(azimuth),
-                        radius * math.sin(elevation),
+                        self.camera_distance * math.cos(elevation) * math.cos(azimuth),
+                        self.camera_distance * math.cos(elevation) * math.sin(azimuth),
+                        self.camera_distance * math.sin(elevation),
                     ),
                 ),
             ).instantiate()
@@ -813,46 +743,40 @@ class MeshRenderer:
         for index, sensor in enumerate(
             tqdm.tqdm(
                 iterable=sensors,
-                colour=mpl.colors.cnames["dodgerblue"],
-                desc="Rendering views...",
+                colour=colors.to_hex("dodgerblue"),
+                desc="Rendering the mesh...",
             )
         ):
             image = mi.render(scene, sensor=sensor)
 
-            output_file = self.output_dir / "images" / f"{index:03d}.png"
+            image = mi.Bitmap(image)
+            image = image.convert(
+                pixel_format=mi.Bitmap.PixelFormat.RGBA,
+                component_format=mi.Struct.Type.UInt8,
+                srgb_gamma=True,
+            )
+
+            image_file = f"images/{index:03d}.png"
+            output_file = self.output_dir / image_file
             output_file.parent.mkdir(parents=True, exist_ok=True)
-            mi.util.write_bitmap(str(output_file), image)
+            image.write(str(output_file))
 
-            if self.export_meta:
-                extrinsic_matrix = sensor.m_to_world.matrix.numpy().squeeze(-1)
-                extrinsic_matrix = extrinsic_matrix @ np.diag([-1.0, -1.0, 1.0, 1.0])
+            extrinsic_matrix = sensor.m_to_world.matrix.numpy().squeeze(-1)
+            extrinsic_matrix = extrinsic_matrix @ np.diag([-1.0, -1.0, 1.0, 1.0])
 
-                [sensor] = scene.sensors()
-                width, height = sensor.film().size()
-                intrinsic_matrix = sensor.projection_transform().matrix.numpy().squeeze(-1)
-                intrinsic_matrix = intrinsic_matrix @ np.diag([-1.0, -1.0, 1.0, 1.0])
-                intrinsic_matrix = np.diag([width, height, 1.0, 1.0]) @ intrinsic_matrix
-                intrinsic_matrix = sp.linalg.block_diag(intrinsic_matrix[:3, :3], np.ones((1, 1)))
+            [sensor] = scene.sensors()
+            width, height = sensor.film().size()
+            intrinsic_matrix = sensor.projection_transform().matrix.numpy().squeeze(-1)
+            intrinsic_matrix = intrinsic_matrix @ np.diag([-1.0, -1.0, 1.0, 1.0])
+            intrinsic_matrix = np.diag([width, height, 1.0, 1.0]) @ intrinsic_matrix
+            intrinsic_matrix = scipy.linalg.block_diag(intrinsic_matrix[:3, :3], np.ones((1, 1)))
 
-                frame = dict(
-                    rgb_path=str(output_file.relative_to(self.output_dir)),
-                    camtoworld=extrinsic_matrix.tolist(),
-                    intrinsics=intrinsic_matrix.tolist(),
-                )
-                frames.append(frame)
-
-        if self.export_mesh:
-            mesh_dir = self.output_dir / "meshes"
-            mesh_dir.mkdir(parents=True, exist_ok=True)
-            for shape in scene.shapes():
-                if re.search(self.exported_mesh_regex, shape.id()):
-                    if not shape.is_mesh():
-                        raise ValueError(f"{shape.id()} is not a mesh.")
-                    shape.write_ply(str(mesh_dir / f"{shape.id()}.ply"))
-            meshes = list(map(trimesh.load, mesh_dir.iterdir()))
-            mesh = trimesh.util.concatenate(meshes)
-            mesh_file = self.output_dir / "mesh.ply"
-            mesh.export(mesh_file)
+            frame = dict(
+                rgb_path=str(output_file.relative_to(self.output_dir)),
+                camtoworld=extrinsic_matrix.tolist(),
+                intrinsics=intrinsic_matrix.tolist(),
+            )
+            frames.append(frame)
 
         if self.export_meta:
             aabb = tuple(zip(*self.scene_aabb, strict=True))
@@ -867,6 +791,20 @@ class MeshRenderer:
             meta_file = self.output_dir / "meta_data.json"
             with meta_file.open("w") as fp:
                 json.dump(meta_data, fp, indent=4)
+
+        if self.export_mesh:
+            for shape in scene.shapes():
+                if re.search(self.exported_mesh_regex, shape.id()):
+                    if not shape.is_mesh():
+                        raise ValueError(f"{shape.id()} is not a mesh.")
+                    output_file = self.output_dir / "meshes" / f"{shape.id()}.ply"
+                    output_file.parent.mkdir(parents=True, exist_ok=True)
+                    shape.write_ply(str(output_file))
+
+            meshes = list(map(trimesh.load, output_file.parent.iterdir()))
+            mesh = trimesh.util.concatenate(meshes)
+            mesh_file = self.output_dir / "mesh.ply"
+            mesh.export(mesh_file)
 
         loguru.logger.success("Finished!")
 
