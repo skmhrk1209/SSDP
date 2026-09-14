@@ -40,9 +40,7 @@ scheduler:
       --meta-file=datasets/nerfstudio/sdfstudio/toy/{primitive}/{scene_id}/meta_data.json \
       --config-file=${hydra:runtime.output_dir}/nerfstudio/config.yml \
       --output-file=${hydra:runtime.output_dir}/nerfstudio/evaluation/depth/metrics.json \
-      --ray-stride=1 \
       --ray-interval={eval_ray_interval} \
-      --no-use-tight-aabb \
       --no-use-foreground-masks \
       --boundary-threshold=0.0 \
   params:
@@ -51,7 +49,7 @@ scheduler:
     nlml_color_loss_mult: 1.0
     volume_color_loss_mult: 0.0
     mcubes_resolution: 512
-    eval_ray_interval: 0.08
+    eval_ray_interval: 0.01
     deterministic_end_ratio: 0.5
     up_cross_approx_end_ratio: 1.0
     up_cross_anneal_end_ratio: 1.0
