@@ -1,0 +1,62 @@
+# @package _global_
+
+scheduler:
+  command: |-
+    uv run ns-train \
+      {method_name} \
+        --output-dir={output_dir} \
+        --project-name={project_name} \
+        --experiment-name={experiment_name} \
+        --timestamp={timestamp} \
+        --machine.seed={random_seed} \
+        --pipeline.model.uniform-sampling={uniform_sampling} \
+        --pipeline.model.num-neus-samples-per-ray={num_samples_per_ray} \
+        --pipeline.model.nlml-color-loss-mult={nlml_color_loss_mult} \
+        --pipeline.model.volume-color-loss-mult={volume_color_loss_mult} \
+        --pipeline.model.sdf-field.bias={sdf_initial_radius} \
+        --pipeline.model.sdf-field.deterministic-end-ratio={deterministic_end_ratio} \
+        --pipeline.model.sdf-field.up-cross-approx-end-ratio={up_cross_approx_end_ratio} \
+        --pipeline.model.sdf-field.up-cross-anneal-end-ratio={up_cross_anneal_end_ratio} \
+        --pipeline.model.sdf-field.survival-approx-end-ratio={survival_approx_end_ratio} \
+        sdfstudio-data \
+            --data=datasets/nerfstudio/sdfstudio/toy/{primitive}/{scene_id} \
+    && uv run ns-export \
+      marching-cubes \
+        --load-config=${hydra:runtime.output_dir}/nerfstudio/config.yml \
+        --output-dir=${hydra:runtime.output_dir}/nerfstudio/export \
+        --resolution={mcubes_resolution} \
+    && mv \
+      ${hydra:runtime.output_dir}/nerfstudio/export/sdf_marching_cubes_mesh.ply \
+      ${hydra:runtime.output_dir}/nerfstudio/export/mesh.ply \
+    && uv run python tools/evaluation/postprocess_mesh.py \
+      --mesh-file=${hydra:runtime.output_dir}/nerfstudio/export/mesh.ply \
+      --meta-file=datasets/nerfstudio/sdfstudio/toy/{primitive}/{scene_id}/meta_data.json \
+      --config-file=${hydra:runtime.output_dir}/nerfstudio/config.yml \
+      --output-file=${hydra:runtime.output_dir}/nerfstudio/export/mesh_unmasked.ply \
+      --input-normalized-mesh \
+      --no-output-normalized-mesh \
+    && uv run python tools/evaluation/evaluate_uq_metrics.py \
+      --target-mesh-file=datasets/nerfstudio/sdfstudio/toy/{primitive}/{scene_id}/mesh.ply \
+      --meta-file=datasets/nerfstudio/sdfstudio/toy/{primitive}/{scene_id}/meta_data.json \
+      --config-file=${hydra:runtime.output_dir}/nerfstudio/config.yml \
+      --output-file=${hydra:runtime.output_dir}/nerfstudio/evaluation/depth/metrics.json \
+      --ray-stride=1 \
+      --ray-interval={eval_ray_interval} \
+      --no-use-tight-aabb \
+      --no-use-foreground-masks \
+      --boundary-threshold=0.0 \
+  params:
+    primitive: cuboid
+    scene_id: k3_w0.05
+    nlml_color_loss_mult: 1.0
+    volume_color_loss_mult: 0.0
+    mcubes_resolution: 512
+    eval_ray_interval: 0.08
+    deterministic_end_ratio: 0.5
+    up_cross_approx_end_ratio: 1.0
+    up_cross_anneal_end_ratio: 1.0
+    survival_approx_end_ratio: 1.0
+    random_seed: 42
+    uniform_sampling: false
+    num_samples_per_ray: 48
+    sdf_initial_radius: 0.1
