@@ -67,6 +67,8 @@ class MaterialType(enum.StrEnum):
 @dataclasses.dataclass
 class MaterialConfig:
     material_type: MaterialType
+    use_mesh_attribute: bool = False
+    mesh_attribute_key: str = "vertex_color"
     diffuse_reflectance: tuple[float, float, float] = (0.5, 0.5, 0.5)
     specular_roughness: float = 0.1
     interior_ior: str = "bk7"
@@ -74,18 +76,27 @@ class MaterialConfig:
     conductor_ior: str = "none"
     normal_distribution: str = "beckmann"
     sample_visible_normals: bool = True
-    enable_internal_color_shifts: bool = False
+    enable_nonlinear_color_shifts: bool = False
 
     def instantiate(self) -> mi.BSDF:
         material = dict(type=self.material_type)
 
         if self.material_type is MaterialType.DIFFUSE:
-            material.update(
-                reflectance=dict(
-                    type="rgb",
-                    value=self.diffuse_reflectance,
-                ),
-            )
+            if self.use_mesh_attribute:
+                material.update(
+                    reflectance=dict(
+                        type="mesh_attribute",
+                        name=self.mesh_attribute_key,
+                    ),
+                )
+
+            else:
+                material.update(
+                    reflectance=dict(
+                        type="rgb",
+                        value=self.diffuse_reflectance,
+                    ),
+                )
 
         elif (
             self.material_type is MaterialType.DIELECTRIC
@@ -108,7 +119,7 @@ class MaterialConfig:
                         type="rgb",
                         value=self.diffuse_reflectance,
                     ),
-                    nonlinear=self.enable_internal_color_shifts,
+                    nonlinear=self.enable_nonlinear_color_shifts,
                 )
 
             if (
@@ -125,9 +136,7 @@ class MaterialConfig:
             self.material_type is MaterialType.CONDUCTOR
             or self.material_type is MaterialType.ROUGHCONDUCTOR
         ):
-            material.update(
-                material=self.conductor_ior,
-            )
+            material.update(material=self.conductor_ior)
 
             if self.material_type is MaterialType.ROUGHCONDUCTOR:
                 material.update(
@@ -218,6 +227,7 @@ class EmitterConfig:
                     value=intensity,
                 ),
             )
+
             if self.emitter_type is EmitterType.SPOT:
                 emitter.update(
                     cutoff_angle=self.cutoff_angle,
@@ -272,6 +282,7 @@ class ShapeType(enum.StrEnum):
 @dataclasses.dataclass
 class PLYConfig:
     mesh_file: Path | None = None
+    face_normals: bool = False
 
 
 @dataclasses.dataclass
@@ -332,7 +343,10 @@ class ShapeConfig:
         shape = dict(type=self.shape_type)
 
         if self.shape_type is ShapeType.PLY:
-            shape.update(filename=str(self.ply_config.mesh_file))
+            shape.update(
+                filename=str(self.ply_config.mesh_file),
+                face_normals=self.ply_config.face_normals,
+            )
 
         elif self.shape_type is ShapeType.SDFGRID:
             sdf_grid = self.sdf_config.instantiate()
@@ -344,6 +358,7 @@ class ShapeConfig:
             scale_factors = [1.0, 1.0, 1.0]
             translation_vector = [0.0, 0.0, 0.0]
             quaternion_vector = [1.0, 0.0, 0.0, 0.0]
+
             if self.transform_config:
                 pose_config = self.transform_config.pose_config
                 scale_factors = self.transform_config.scale_factors
@@ -352,12 +367,14 @@ class ShapeConfig:
                 quaternion_vector = Rotation.from_matrix(rotation_matrix).as_quat(
                     scalar_first=True
                 )
+
             shape.update(
                 scales=mi.TensorXf([scale_factors]),
                 centers=mi.TensorXf([translation_vector]),
                 quaternions=mi.TensorXf([quaternion_vector]),
                 extent=1.0,
             )
+
             if self.shape_type is ShapeType.ELLIPSOIDSMESH:
                 sphere = trimesh.creation.icosphere(4)
                 sphere.export(filename := "/tmp/sphere.ply")

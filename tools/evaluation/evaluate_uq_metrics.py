@@ -165,6 +165,7 @@ class UQMetricEvaluator:
     ray_interval: float = 0.005
     num_calib_bins: int = 100
     ray_chunk_size: int = 1 << 12
+    use_foreground_masks: bool = True
     foreground_threshold: float = 0.5
     boundary_threshold: float = 50.0
 
@@ -400,26 +401,34 @@ class UQMetricEvaluator:
         with open(self.meta_file) as fp:
             meta_data = json.load(fp)
 
+        width: int = meta_data["width"]
+        height: int = meta_data["height"]
+
         unnorm_matrix = torch.as_tensor(meta_data["worldtogt"])
         norm_matrix: torch.Tensor = torch.linalg.inv(unnorm_matrix)
         if transform_matrix is not None:
             norm_matrix = transform_matrix @ norm_matrix
 
-        foreground_files: list[str] = list(map(itemgetter("foreground_mask"), meta_data["frames"]))
-        foreground_masks = torch.stack(
-            [
-                transforms.functional.to_dtype(
-                    inpt=torchvision.io.decode_image(
-                        input=self.meta_file.parent / foreground_file,
-                        mode=torchvision.io.ImageReadMode.GRAY,
-                    ),
-                    dtype=torch.float32,
-                    scale=True,
-                )
-                for foreground_file in foreground_files
-            ],
-            dim=0,
-        )
+        if self.use_foreground_masks:
+            foreground_files: list[str] = list(
+                map(itemgetter("foreground_mask"), meta_data["frames"])
+            )
+            foreground_masks = torch.stack(
+                [
+                    transforms.functional.to_dtype(
+                        inpt=torchvision.io.decode_image(
+                            input=self.meta_file.parent / foreground_file,
+                            mode=torchvision.io.ImageReadMode.GRAY,
+                        ),
+                        dtype=torch.float32,
+                        scale=True,
+                    )
+                    for foreground_file in foreground_files
+                ],
+                dim=0,
+            )
+        else:
+            foreground_masks = torch.ones(len(meta_data["frames"]), 1, height, width)
 
         target_mesh = trimesh.load_mesh(self.target_mesh_file)
         target_mesh = target_mesh.apply_transform(norm_matrix.numpy())

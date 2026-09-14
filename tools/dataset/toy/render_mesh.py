@@ -22,6 +22,7 @@ from scipy.spatial.transform import Rotation
 from nerfstudio.models.base_surface_model import SurfaceModel
 from nerfstudio.utils.eval_utils import eval_setup
 from ssdp.fields import SDF
+from ssdp.utils import git
 
 
 @dataclasses.dataclass
@@ -67,6 +68,8 @@ class MaterialType(enum.StrEnum):
 @dataclasses.dataclass
 class MaterialConfig:
     material_type: MaterialType
+    use_mesh_attribute: bool = False
+    mesh_attribute_key: str = "vertex_color"
     diffuse_reflectance: tuple[float, float, float] = (0.5, 0.5, 0.5)
     specular_roughness: float = 0.1
     interior_ior: str = "bk7"
@@ -74,18 +77,27 @@ class MaterialConfig:
     conductor_ior: str = "none"
     normal_distribution: str = "beckmann"
     sample_visible_normals: bool = True
-    enable_internal_color_shifts: bool = False
+    enable_nonlinear_color_shifts: bool = False
 
     def instantiate(self) -> mi.BSDF:
         material = dict(type=self.material_type)
 
         if self.material_type is MaterialType.DIFFUSE:
-            material.update(
-                reflectance=dict(
-                    type="rgb",
-                    value=self.diffuse_reflectance,
-                ),
-            )
+            if self.use_mesh_attribute:
+                material.update(
+                    reflectance=dict(
+                        type="mesh_attribute",
+                        name=self.mesh_attribute_key,
+                    ),
+                )
+
+            else:
+                material.update(
+                    reflectance=dict(
+                        type="rgb",
+                        value=self.diffuse_reflectance,
+                    ),
+                )
 
         elif (
             self.material_type is MaterialType.DIELECTRIC
@@ -108,7 +120,7 @@ class MaterialConfig:
                         type="rgb",
                         value=self.diffuse_reflectance,
                     ),
-                    nonlinear=self.enable_internal_color_shifts,
+                    nonlinear=self.enable_nonlinear_color_shifts,
                 )
 
             if (
@@ -125,9 +137,7 @@ class MaterialConfig:
             self.material_type is MaterialType.CONDUCTOR
             or self.material_type is MaterialType.ROUGHCONDUCTOR
         ):
-            material.update(
-                material=self.conductor_ior,
-            )
+            material.update(material=self.conductor_ior)
 
             if self.material_type is MaterialType.ROUGHCONDUCTOR:
                 material.update(
@@ -218,6 +228,7 @@ class EmitterConfig:
                     value=intensity,
                 ),
             )
+
             if self.emitter_type is EmitterType.SPOT:
                 emitter.update(
                     cutoff_angle=self.cutoff_angle,
@@ -272,6 +283,7 @@ class ShapeType(enum.StrEnum):
 @dataclasses.dataclass
 class PLYConfig:
     mesh_file: Path | None = None
+    face_normals: bool = False
 
 
 @dataclasses.dataclass
@@ -332,7 +344,10 @@ class ShapeConfig:
         shape = dict(type=self.shape_type)
 
         if self.shape_type is ShapeType.PLY:
-            shape.update(filename=str(self.ply_config.mesh_file))
+            shape.update(
+                filename=str(self.ply_config.mesh_file),
+                face_normals=self.ply_config.face_normals,
+            )
 
         elif self.shape_type is ShapeType.SDFGRID:
             sdf_grid = self.sdf_config.instantiate()
@@ -344,6 +359,7 @@ class ShapeConfig:
             scale_factors = [1.0, 1.0, 1.0]
             translation_vector = [0.0, 0.0, 0.0]
             quaternion_vector = [1.0, 0.0, 0.0, 0.0]
+
             if self.transform_config:
                 pose_config = self.transform_config.pose_config
                 scale_factors = self.transform_config.scale_factors
@@ -352,12 +368,14 @@ class ShapeConfig:
                 quaternion_vector = Rotation.from_matrix(rotation_matrix).as_quat(
                     scalar_first=True
                 )
+
             shape.update(
                 scales=mi.TensorXf([scale_factors]),
                 centers=mi.TensorXf([translation_vector]),
                 quaternions=mi.TensorXf([quaternion_vector]),
                 extent=1.0,
             )
+
             if self.shape_type is ShapeType.ELLIPSOIDSMESH:
                 sphere = trimesh.creation.icosphere(4)
                 sphere.export(filename := "/tmp/sphere.ply")
@@ -625,48 +643,76 @@ class MeshRenderer:
                     ply_config=PLYConfig(),
                     material_config=MaterialConfig(
                         material_type=MaterialType.DIFFUSE,
-                        diffuse_reflectance=(0.25, 0.25, 0.25),
+                        use_mesh_attribute=True,
+                        mesh_attribute_key="vertex_color",
+                    ),
+                ),
+                ground=ShapeConfig(
+                    shape_type=ShapeType.RECTANGLE,
+                    transform_config=TransformConfig(
+                        pose_config=PoseConfig(
+                            origin=(0.0, 0.0, -0.5),
+                            target=(0.0, 0.0, 1.0),
+                            upward=(0.0, 1.0, 0.0),
+                        ),
+                        scale_factors=(100.0, 100.0, 1.0),
+                    ),
+                    material_config=MaterialConfig(
+                        material_type=MaterialType.ROUGHPLASTIC,
+                        diffuse_reflectance=(1.0, 1.0, 1.0),
+                        specular_roughness=0.1,
+                        interior_ior="polypropylene",
                     ),
                 ),
             ),
             emitter_configs=dict(
                 env_light=EmitterConfig(
                     emitter_type=EmitterType.CONSTANT,
-                    scale_factor=0.1,
+                    scale_factor=0.25,
                 ),
                 key_light=ShapeConfig(
                     shape_type=ShapeType.RECTANGLE,
                     transform_config=TransformConfig(
                         pose_config=PoseConfig(
-                            origin=(1.0, 1.0, 1.0),
+                            origin=(2.0, 2.0, 2.0),
                             target=(0.0, 0.0, 0.0),
                             upward=(0.0, 0.0, 1.0),
                         ),
                     ),
                     emitter_config=EmitterConfig(
                         emitter_type=EmitterType.AREA,
-                        scale_factor=16.0,
+                        radiometry=(1.0, 0.75, 0.5),
+                        scale_factor=10.0,
                     ),
                 ),
                 fill_light=ShapeConfig(
                     shape_type=ShapeType.RECTANGLE,
                     transform_config=TransformConfig(
                         pose_config=PoseConfig(
-                            origin=(-1.0, -1.0, -1.0),
+                            origin=(-2.0, -2.0, 2.0),
                             target=(0.0, 0.0, 0.0),
                             upward=(0.0, 0.0, 1.0),
                         ),
                     ),
                     emitter_config=EmitterConfig(
                         emitter_type=EmitterType.AREA,
-                        scale_factor=8.0,
+                        radiometry=(0.5, 0.75, 1.0),
+                        scale_factor=10.0,
                     ),
                 ),
             ),
             sensor_config=SensorConfig(
                 sensor_type=SensorType.PERSPECTIVE,
+                fov_angle=30.0,
+                fov_axis="x",
+                pose_config=PoseConfig(
+                    origin=(0.0, 0.0, 0.0),
+                    target=(0.0, 0.0, 0.0),
+                    upward=(0.0, 0.0, 1.0),
+                ),
                 film_config=FilmConfig(
                     film_type=FilmType.HDRFILM,
+                    image_size=(1000, 1000),
                     filter_config=FilterConfig(
                         filter_type=FilterType.GAUSSIAN,
                     ),
@@ -694,12 +740,13 @@ class MeshRenderer:
     )
     export_meta: bool = True
     export_mesh: bool = True
+    face_normals: bool = True
     azimuth_range: tuple[float, float] = (-math.pi, math.pi)
     elevation_range: tuple[float, float] = (0.0, math.pi / 4.0)
-    camera_distance: float = 3.0
-    num_azimuth_views: int = 8
+    camera_distance: float = 4.0
+    num_azimuth_views: int = 16
     num_elevation_views: int = 2
-    exported_mesh_regex: str = r"^(?!.*light).*$"
+    exported_mesh_regex: str = r"^(?!.*(light|ground)).*$"
 
     def __call__(self) -> None:
         mi.set_variant("cuda_ad_rgb")
@@ -710,11 +757,22 @@ class MeshRenderer:
                 ply_config=dataclasses.replace(
                     self.scene_config.shape_configs["object"].ply_config,
                     mesh_file=self.mesh_file,
+                    face_normals=self.face_normals,
                 ),
             ),
         )
 
         scene = self.scene_config.instantiate()
+
+        # NOTE: trimesh writes RGBA, so the PLY loader creates a 4-channel `vertex_color`,
+        # which `Mesh::eval_attribute` silently evaluates to zero (only dim 1 or 3 are supported).
+        # Replace it with a 3-channel attribute normalized to [0, 1].
+        for shape in scene.shapes():
+            if shape.is_mesh() and shape.has_attribute("vertex_color"):
+                rgba = np.asarray(shape.attribute_buffer("vertex_color"))
+                rgb = rgba.reshape(-1, 4)[:, :3] / 255.0
+                shape.remove_attribute("vertex_color")
+                shape.add_attribute("vertex_color", 3, rgb.ravel())
 
         sensors = [
             dataclasses.replace(
@@ -779,18 +837,27 @@ class MeshRenderer:
             frames.append(frame)
 
         if self.export_meta:
-            aabb = tuple(zip(*self.scene_aabb, strict=True))
             meta_data = dict(
                 camera_model="OPENCV",
                 width=width,
                 height=height,
-                scene_box=dict(aabb=aabb),
+                has_mono_prior=False,
+                has_foreground_mask=False,
+                has_sparse_sfm_points=False,
+                worldtogt=np.eye(4).tolist(),
+                scene_box=dict(aabb=tuple(zip(*self.scene_aabb, strict=True))),
                 frames=frames,
+                args=dataclasses.asdict(self),
+                git=dict(
+                    branch=git.get_branch(),
+                    commit_id=git.get_commit_id(),
+                    remote_url=git.get_remote_url(),
+                ),
             )
 
             meta_file = self.output_dir / "meta_data.json"
             with meta_file.open("w") as fp:
-                json.dump(meta_data, fp, indent=4)
+                json.dump(meta_data, fp, indent=4, default=str)
 
         if self.export_mesh:
             for shape in scene.shapes():
