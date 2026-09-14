@@ -128,9 +128,9 @@ class SSDPConfig(SDFConfig):
     min_var_epsilon: float = 1.0e-6
     prior_initial_var: float = 1.0e-3
     deterministic_end_ratio: float = 0.5
+    survival_approx_end_ratio: float = 1.0
     up_cross_approx_end_ratio: float = 1.0
     up_cross_anneal_end_ratio: float = 1.0
-    survival_approx_end_ratio: float = 1.0
     quadrature_mode: QuadratureMode = QuadratureMode.GL
 
 
@@ -174,14 +174,14 @@ class SSDP(SDF):
     def _is_deterministic(self) -> bool:
         return self.get_progress_ratio() <= self.config.deterministic_end_ratio
 
+    def _is_survival_approx(self) -> bool:
+        return self.get_progress_ratio() <= self.config.survival_approx_end_ratio
+
     def _is_up_cross_approx(self) -> bool:
         return self.get_progress_ratio() <= self.config.up_cross_approx_end_ratio
 
     def _is_up_cross_anneal(self) -> bool:
         return self.get_progress_ratio() <= self.config.up_cross_anneal_end_ratio
-
-    def _is_survival_approx(self) -> bool:
-        return self.get_progress_ratio() <= self.config.survival_approx_end_ratio
 
     def _get_initial_var(self) -> jt.Float[torch.Tensor, " "]:
         initial_var = nn.functional.softplus(self.initial_var)
