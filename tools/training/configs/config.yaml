@@ -1,0 +1,24 @@
+# @package _global_
+
+defaults:
+  - _base_
+  - _self_
+  - scheduler: tsubame
+  - experiment: dtu
+  - override hydra/job_logging: disabled
+
+# Job identification
+output_dir: outputs
+method_name: ???
+project_name: ???
+experiment_name: ???
+timestamp: ${now:%Y-%m-%d_%H}
+
+# Hydra configuration
+hydra:
+  output_subdir: hydra
+  run:
+    dir: ${hydra.sweep.dir}/${hydra.sweep.subdir}
+  sweep:
+    dir: ${output_dir}/${project_name}/${method_name}
+    subdir: ${experiment_name}/${timestamp}

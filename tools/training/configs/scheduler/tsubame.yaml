@@ -1,0 +1,25 @@
+defaults:
+  - _tsubame_
+
+# Parameters for batch script
+command: ???
+node_type: GPU_H
+num_nodes: 1
+num_gpus: 1
+walltime: 24:00:00
+priority: -5
+job_name: ${experiment_name}
+log_file: ${hydra:runtime.output_dir}/tsubame/job.log
+reserve_id: null
+env_modules: 
+  - cuda/12.8.0
+  - openmpi/5.0.7-gcc
+env_variables: 
+  - PATH=$PATH:$HOME/.local/bin
+  - PYTHONUNBUFFERED=1
+  - TERM=dumb
+
+# Parameters for job submission
+group_name: ${oc.env:GROUP}
+script_file: ${hydra:runtime.output_dir}/tsubame/job.sh
+subscription: false
