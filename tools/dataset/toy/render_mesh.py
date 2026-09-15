@@ -744,7 +744,7 @@ class MeshRenderer:
     azimuth_range: tuple[float, float] = (-math.pi, math.pi)
     elevation_range: tuple[float, float] = (0.0, math.pi / 4.0)
     camera_distance: float = 4.0
-    num_azimuth_views: int = 16
+    num_azimuth_views: int = 32
     num_elevation_views: int = 2
     exported_mesh_regex: str = r"^(?!.*(light|ground)).*$"
 

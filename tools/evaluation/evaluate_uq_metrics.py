@@ -165,6 +165,7 @@ class UQMetricEvaluator:
     ray_interval: float = 0.005
     num_calib_bins: int = 100
     ray_chunk_size: int = 1 << 12
+    use_tight_aabb: bool = True
     use_foreground_masks: bool = True
     foreground_threshold: float = 0.5
     boundary_threshold: float = 50.0
@@ -444,20 +445,23 @@ class UQMetricEvaluator:
         dataloader = datamanager.fixed_indices_eval_dataloader
 
         scene_aabb = model.collider.scene_box.aabb
-        object_aabb = scene_aabb.new_tensor(target_mesh.bounds)
 
-        scene_aabb_min, scene_aabb_max = scene_aabb
-        object_aabb_min, object_aabb_max = object_aabb
+        if self.use_tight_aabb:
+            object_aabb = scene_aabb.new_tensor(target_mesh.bounds)
 
-        aabb_min = torch.maximum(scene_aabb_min, object_aabb_min)
-        aabb_max = torch.minimum(scene_aabb_max, object_aabb_max)
+            scene_aabb_min, scene_aabb_max = scene_aabb
+            object_aabb_min, object_aabb_max = object_aabb
 
-        assert torch.all(aabb_min < aabb_max), (
-            "The object AABB does not intersect with the scene AABB."
-        )
+            scene_aabb_min = torch.maximum(scene_aabb_min, object_aabb_min)
+            scene_aabb_max = torch.minimum(scene_aabb_max, object_aabb_max)
 
-        aabb = torch.stack([aabb_min, aabb_max], dim=0)
-        collider = AABBBoxCollider(SceneBox(aabb))
+            assert torch.all(scene_aabb_min < scene_aabb_max), (
+                "The object AABB does not intersect with the scene AABB."
+            )
+
+            scene_aabb = torch.stack([scene_aabb_min, scene_aabb_max], dim=0)
+
+        collider = AABBBoxCollider(SceneBox(scene_aabb))
 
         norm_scale_factors = torch.linalg.norm(norm_matrix[:3, :3], dim=0)
         norm_scale_factor = torch.amin(norm_scale_factors).item()
