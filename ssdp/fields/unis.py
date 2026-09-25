@@ -1,5 +1,6 @@
 import dataclasses
 import enum
+import fractions
 import math
 from typing import Any, override
 
@@ -29,21 +30,34 @@ SCALING_FACTORS: dict[UNISKernelType, float] = {
 }
 
 
+def _bernoulli_numbers(count: int) -> list[fractions.Fraction]:
+    # B₀ = 1 and Σ_{k=0}^{m} C(m+1, k) Bₖ = 0 for m ≥ 1 (so B₁ = -1/2), in exact rational arithmetic.
+    numbers = [fractions.Fraction(1)]
+    for m in range(1, count):
+        total = sum(math.comb(m + 1, k) * numbers[k] for k in range(m))
+        numbers.append(-total / (m + 1))
+    return numbers
+
+
+def _softplus_antiderivative_coefficients(num_terms: int) -> tuple[tuple[int, float], ...]:
+    # Bernoulli series of the dilogarithm: Li₂(z) = Σ_{n≥0} Bₙ uⁿ⁺¹ / (n+1)! with u = -log(1-z).
+    # For z = -eˣ, u = -softplus(x) =: -v, so -Li₂(-eˣ) = Σ_{n≥0} (-1)ⁿ Bₙ vⁿ⁺¹ / (n+1)!.
+    # Odd n ≥ 3 vanish since Bₙ = 0. Returns pairs of (exponent of v, coefficient).
+    return tuple(
+        (n + 1, float((-1) ** n * number / math.factorial(n + 1)))
+        for n, number in enumerate(_bernoulli_numbers(num_terms))
+        if number != 0
+    )
+
+
 class SoftplusAntiderivative(torch.autograd.Function):
     # H(x) = ∫_{-∞}^{x} softplus(u) du = -Li₂(-eˣ), whose derivative is softplus(x) itself.
-    # Forward: Li₂(z) = Σ_{n≥0} Bₙ uⁿ⁺¹ / (n+1)! with u = -log(1-z) (Bernoulli series).
-    # For z = -eˣ and x ≤ 0, u = -softplus(x) ∈ [-log 2, 0), so the truncation error is < 1e-14.
+    # Forward: the Bernoulli series above in v = softplus(x), which converges for v < 2π.
+    # For x ≤ 0, v ∈ (0, log 2], so the terms up to v¹³ leave a truncation error below 1e-14.
     # For x > 0, the inversion formula H(x) + H(-x) = x² / 2 + π² / 6 reduces it to x ≤ 0.
     # Backward: softplus(x), exactly.
-    COEFFICIENTS: tuple[tuple[int, float], ...] = (
-        (1, 1.0),
-        (2, 1.0 / 4.0),
-        (3, 1.0 / 36.0),
-        (5, -1.0 / 3600.0),
-        (7, 1.0 / 211680.0),
-        (9, -1.0 / 10886400.0),
-        (11, 1.0 / 526901760.0),
-        (13, -691.0 / (2730.0 * 6227020800.0)),
+    COEFFICIENTS: tuple[tuple[int, float], ...] = _softplus_antiderivative_coefficients(
+        num_terms=14
     )
 
     @staticmethod

@@ -17,6 +17,7 @@ from nerfstudio.fields.sdf_field import SDFField
 from ssdp.fields.unis import (
     SCALING_FACTORS,
     UNIS,
+    SoftplusAntiderivative,
     UNISConfig,
     UNISKernelType,
     antiderivative,
@@ -168,6 +169,13 @@ def test_antiderivative_matches_kernel() -> None:
         assert math.isclose(SCALING_FACTORS[kernel_type], scaling_factor, rel_tol=1.0e-3), (
             kernel_type
         )
+
+    # The generated Bernoulli series starts with v + v² / 4 + v³ / 36 - v⁵ / 3600 + v⁷ / 211680.
+    exponents, coefficients = zip(*SoftplusAntiderivative.COEFFICIENTS, strict=True)
+    assert exponents == (1, 2, 3, 5, 7, 9, 11, 13)
+    assert np.allclose(
+        coefficients[:5], [1.0, 1.0 / 4.0, 1.0 / 36.0, -1.0 / 3600.0, 1.0 / 211680.0]
+    )
 
     # The softplus antiderivative is -Li₂(-eˣ) = -spence(1 + eˣ) (SciPy's convention).
     with torch.no_grad():
