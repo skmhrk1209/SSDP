@@ -5,14 +5,14 @@ import enum
 import itertools
 import json
 import math
+import re
 from pathlib import Path
 
-import kornia
 import loguru
 import mitsuba as mi
 import numpy as np
+import scipy.linalg
 import torch
-import torch.nn as nn
 import tqdm
 import trimesh
 import tyro
@@ -22,6 +22,7 @@ from scipy.spatial.transform import Rotation
 from nerfstudio.models.base_surface_model import SurfaceModel
 from nerfstudio.utils.eval_utils import eval_setup
 from ssdp.fields import SDF
+from ssdp.utils import git
 
 
 @dataclasses.dataclass
@@ -632,8 +633,6 @@ class SceneConfig:
 @dataclasses.dataclass
 class MeshRenderer:
     mesh_file: Path
-    meta_file: Path
-    config_file: Path
     output_dir: Path
 
     scene_config: SceneConfig = dataclasses.field(
@@ -644,48 +643,76 @@ class MeshRenderer:
                     ply_config=PLYConfig(),
                     material_config=MaterialConfig(
                         material_type=MaterialType.DIFFUSE,
-                        diffuse_reflectance=(0.25, 0.25, 0.25),
+                        use_mesh_attribute=True,
+                        mesh_attribute_key="vertex_color",
+                    ),
+                ),
+                ground=ShapeConfig(
+                    shape_type=ShapeType.RECTANGLE,
+                    transform_config=TransformConfig(
+                        pose_config=PoseConfig(
+                            origin=(0.0, 0.0, -0.5),
+                            target=(0.0, 0.0, 1.0),
+                            upward=(0.0, 1.0, 0.0),
+                        ),
+                        scale_factors=(100.0, 100.0, 1.0),
+                    ),
+                    material_config=MaterialConfig(
+                        material_type=MaterialType.ROUGHPLASTIC,
+                        diffuse_reflectance=(1.0, 1.0, 1.0),
+                        specular_roughness=0.1,
+                        interior_ior="polypropylene",
                     ),
                 ),
             ),
             emitter_configs=dict(
                 env_light=EmitterConfig(
                     emitter_type=EmitterType.CONSTANT,
-                    scale_factor=0.1,
+                    scale_factor=0.25,
                 ),
                 key_light=ShapeConfig(
                     shape_type=ShapeType.RECTANGLE,
                     transform_config=TransformConfig(
                         pose_config=PoseConfig(
-                            origin=(1.0, 1.0, 1.0),
+                            origin=(2.0, 2.0, 2.0),
                             target=(0.0, 0.0, 0.0),
                             upward=(0.0, 0.0, 1.0),
                         ),
                     ),
                     emitter_config=EmitterConfig(
                         emitter_type=EmitterType.AREA,
-                        scale_factor=16.0,
+                        radiometry=(1.0, 0.75, 0.5),
+                        scale_factor=10.0,
                     ),
                 ),
                 fill_light=ShapeConfig(
                     shape_type=ShapeType.RECTANGLE,
                     transform_config=TransformConfig(
                         pose_config=PoseConfig(
-                            origin=(-1.0, -1.0, -1.0),
+                            origin=(-2.0, -2.0, 2.0),
                             target=(0.0, 0.0, 0.0),
                             upward=(0.0, 0.0, 1.0),
                         ),
                     ),
                     emitter_config=EmitterConfig(
                         emitter_type=EmitterType.AREA,
-                        scale_factor=8.0,
+                        radiometry=(0.5, 0.75, 1.0),
+                        scale_factor=10.0,
                     ),
                 ),
             ),
             sensor_config=SensorConfig(
                 sensor_type=SensorType.PERSPECTIVE,
+                fov_angle=30.0,
+                fov_axis="x",
+                pose_config=PoseConfig(
+                    origin=(0.0, 0.0, 0.0),
+                    target=(0.0, 0.0, 0.0),
+                    upward=(0.0, 0.0, 1.0),
+                ),
                 film_config=FilmConfig(
                     film_type=FilmType.HDRFILM,
+                    image_size=(1000, 1000),
                     filter_config=FilterConfig(
                         filter_type=FilterType.GAUSSIAN,
                     ),
@@ -702,35 +729,26 @@ class MeshRenderer:
         )
     )
 
+    scene_aabb: tuple[
+        tuple[float, float],
+        tuple[float, float],
+        tuple[float, float],
+    ] = (
+        (-1.0, 1.0),
+        (-1.0, 1.0),
+        (-1.0, 1.0),
+    )
+    export_meta: bool = True
+    export_mesh: bool = True
+    face_normals: bool = True
+    azimuth_range: tuple[float, float] = (-math.pi, math.pi)
+    elevation_range: tuple[float, float] = (0.0, math.pi / 4.0)
+    camera_distance: float = 4.0
+    num_azimuth_views: int = 32
+    num_elevation_views: int = 2
+    exported_mesh_regex: str = r"^(?!.*(light|ground)).*$"
+
     def __call__(self) -> None:
-        # NOTE: Since the camera poses are transformed by `SDFStudio` dataparser in nerfstudio,
-        # the world coordinate system is also transformed accordingly.
-        # https://github.com/nerfstudio-project/nerfstudio/blob/v1.1.5/nerfstudio/data/dataparsers/sdfstudio_dataparser.py#L113
-        _, pipeline, _, _ = eval_setup(self.config_file)
-        dataset = pipeline.datamanager.train_dataset
-        transform_matrix: torch.Tensor | None = dataset.metadata.get("transform")
-        if transform_matrix is not None:
-            row_vector = transform_matrix.new_tensor([[0.0, 0.0, 0.0, 1.0]])
-            transform_matrix = torch.cat([transform_matrix, row_vector], dim=0)
-
-        with open(self.meta_file) as fp:
-            meta_data = json.load(fp)
-
-        width: int = meta_data["width"]
-        height: int = meta_data["height"]
-
-        unnorm_matrix = torch.as_tensor(meta_data["worldtogt"])
-        norm_matrix: torch.Tensor = torch.linalg.inv(unnorm_matrix)
-        if transform_matrix is not None:
-            norm_matrix = transform_matrix @ norm_matrix
-
-        mesh = trimesh.load_mesh(self.mesh_file)
-        mesh.apply_transform(norm_matrix.numpy())
-
-        mesh_file = self.output_dir / self.mesh_file.name
-        mesh_file.parent.mkdir(parents=True, exist_ok=True)
-        mesh.export(mesh_file)
-
         mi.set_variant("cuda_ad_rgb")
 
         self.scene_config.shape_configs.update(
@@ -738,93 +756,55 @@ class MeshRenderer:
                 self.scene_config.shape_configs["object"],
                 ply_config=dataclasses.replace(
                     self.scene_config.shape_configs["object"].ply_config,
-                    mesh_file=mesh_file,
+                    mesh_file=self.mesh_file,
+                    face_normals=self.face_normals,
                 ),
             ),
         )
 
         scene = self.scene_config.instantiate()
-        params = mi.traverse(scene)
 
-        for frame in tqdm.tqdm(
-            iterable=meta_data["frames"],
-            colour=colors.to_hex("dodgerblue"),
-            desc="Rendering the mesh...",
+        # NOTE: trimesh writes RGBA, so the PLY loader creates a 4-channel `vertex_color`,
+        # which `Mesh::eval_attribute` silently evaluates to zero (only dim 1 or 3 are supported).
+        # Replace it with a 3-channel attribute normalized to [0, 1].
+        for shape in scene.shapes():
+            if shape.is_mesh() and shape.has_attribute("vertex_color"):
+                rgba = np.asarray(shape.attribute_buffer("vertex_color"))
+                rgb = rgba.reshape(-1, 4)[:, :3] / 255.0
+                shape.remove_attribute("vertex_color")
+                shape.add_attribute("vertex_color", 3, rgb.ravel())
+
+        sensors = [
+            dataclasses.replace(
+                self.scene_config.sensor_config,
+                pose_config=dataclasses.replace(
+                    self.scene_config.sensor_config.pose_config,
+                    origin=(
+                        self.camera_distance * math.cos(elevation) * math.cos(azimuth),
+                        self.camera_distance * math.cos(elevation) * math.sin(azimuth),
+                        self.camera_distance * math.sin(elevation),
+                    ),
+                ),
+            ).instantiate()
+            for elevation in np.linspace(
+                *self.elevation_range,
+                self.num_elevation_views + 2,
+            )[1:-1]
+            for azimuth in np.linspace(
+                *self.azimuth_range,
+                self.num_azimuth_views + 1,
+            )[:-1]
+        ]
+
+        frames = []
+
+        for index, sensor in enumerate(
+            tqdm.tqdm(
+                iterable=sensors,
+                colour=colors.to_hex("dodgerblue"),
+                desc="Rendering the mesh...",
+            )
         ):
-            pose_matrix = torch.as_tensor(frame["camtoworld"])
-            pose_matrix = pose_matrix @ torch.diag(pose_matrix.new_tensor([-1.0, -1.0, 1.0, 1.0]))
-            if transform_matrix is not None:
-                pose_matrix = transform_matrix @ pose_matrix
-
-            intrinsic_matrix = torch.as_tensor(frame["intrinsics"])
-
-            def _get_light_origin(
-                x_angle: float,
-                y_angle: float,
-                distance: float = 3.0,
-                pose_matrix: torch.Tensor = pose_matrix,
-            ) -> tuple[float, float, float]:
-                x_axis_angle = pose_matrix.new_tensor([[1.0, 0.0, 0.0]]) * math.radians(x_angle)
-                y_axis_angle = pose_matrix.new_tensor([[0.0, 1.0, 0.0]]) * math.radians(y_angle)
-                [x_rotation_matrix] = kornia.geometry.axis_angle_to_rotation_matrix(x_axis_angle)
-                [y_rotation_matrix] = kornia.geometry.axis_angle_to_rotation_matrix(y_axis_angle)
-                mesh_centroid = pose_matrix.new_tensor(mesh.centroid)
-                camera_direction = pose_matrix[..., :-1, -1] - mesh_centroid
-                camera_direction = nn.functional.normalize(camera_direction, dim=-1) * distance
-                light_direction = (
-                    pose_matrix[..., :-1, :-1]
-                    @ y_rotation_matrix
-                    @ x_rotation_matrix
-                    @ pose_matrix[..., :-1, :-1].T
-                    @ camera_direction
-                )
-                light_origin = mesh_centroid + light_direction
-                light_origin = tuple(light_origin.tolist())
-                return light_origin
-
-            key_light_transform_config = dataclasses.replace(
-                self.scene_config.emitter_configs["key_light"].transform_config,
-                pose_config=dataclasses.replace(
-                    self.scene_config.emitter_configs["key_light"].transform_config.pose_config,
-                    origin=_get_light_origin(45.0, 45.0),
-                    target=mesh.centroid,
-                ),
-            )
-            fill_light_transform_config = dataclasses.replace(
-                self.scene_config.emitter_configs["fill_light"].transform_config,
-                pose_config=dataclasses.replace(
-                    self.scene_config.emitter_configs["fill_light"].transform_config.pose_config,
-                    origin=_get_light_origin(-45.0, -45.0),
-                    target=mesh.centroid,
-                ),
-            )
-
-            key_light_transform = key_light_transform_config.instantiate()
-            fill_light_transform = fill_light_transform_config.instantiate()
-
-            params["key_light.to_world"] = key_light_transform
-            params["fill_light.to_world"] = fill_light_transform
-            params.update()
-
-            sensor = mi.load_dict(
-                dict(
-                    type="perspective",
-                    fov_axis="x",
-                    fov=math.degrees(2.0 * math.atan(width / (2.0 * intrinsic_matrix[0][0]))),
-                    # NOTE: `principal_point_offset` should be normalized.
-                    principal_point_offset_x=(width / 2.0 - intrinsic_matrix[0][2]) / width,
-                    principal_point_offset_y=(height / 2.0 - intrinsic_matrix[1][2]) / height,
-                    near_clip=self.scene_config.sensor_config.clip_range[0],
-                    far_clip=self.scene_config.sensor_config.clip_range[1],
-                    to_world=mi.ScalarTransform4f(pose_matrix),
-                    film=dataclasses.replace(
-                        self.scene_config.sensor_config.film_config,
-                        image_size=(width, height),
-                    ).instantiate(),
-                    sampler=self.scene_config.sensor_config.sampler_config.instantiate(),
-                )
-            )
-
             image = mi.render(scene, sensor=sensor)
 
             image = mi.Bitmap(image)
@@ -834,11 +814,64 @@ class MeshRenderer:
                 srgb_gamma=True,
             )
 
-            image_file = Path(frame["rgb_path"])
-            image_file = image_file.with_suffix(".png")
-            output_file = self.output_dir / image_file.name
+            image_file = f"images/{index:03d}.png"
+            output_file = self.output_dir / image_file
             output_file.parent.mkdir(parents=True, exist_ok=True)
             image.write(str(output_file))
+
+            extrinsic_matrix = sensor.m_to_world.matrix.numpy().squeeze(-1)
+            extrinsic_matrix = extrinsic_matrix @ np.diag([-1.0, -1.0, 1.0, 1.0])
+
+            [sensor] = scene.sensors()
+            width, height = sensor.film().size()
+            intrinsic_matrix = sensor.projection_transform().matrix.numpy().squeeze(-1)
+            intrinsic_matrix = intrinsic_matrix @ np.diag([-1.0, -1.0, 1.0, 1.0])
+            intrinsic_matrix = np.diag([width, height, 1.0, 1.0]) @ intrinsic_matrix
+            intrinsic_matrix = scipy.linalg.block_diag(intrinsic_matrix[:3, :3], np.ones((1, 1)))
+
+            frame = dict(
+                rgb_path=str(output_file.relative_to(self.output_dir)),
+                camtoworld=extrinsic_matrix.tolist(),
+                intrinsics=intrinsic_matrix.tolist(),
+            )
+            frames.append(frame)
+
+        if self.export_meta:
+            meta_data = dict(
+                camera_model="OPENCV",
+                width=width,
+                height=height,
+                has_mono_prior=False,
+                has_foreground_mask=False,
+                has_sparse_sfm_points=False,
+                worldtogt=np.eye(4).tolist(),
+                scene_box=dict(aabb=tuple(zip(*self.scene_aabb, strict=True))),
+                frames=frames,
+                args=dataclasses.asdict(self),
+                git=dict(
+                    branch=git.get_branch(),
+                    commit_id=git.get_commit_id(),
+                    remote_url=git.get_remote_url(),
+                ),
+            )
+
+            meta_file = self.output_dir / "meta_data.json"
+            with meta_file.open("w") as fp:
+                json.dump(meta_data, fp, indent=4, default=str)
+
+        if self.export_mesh:
+            for shape in scene.shapes():
+                if re.search(self.exported_mesh_regex, shape.id()):
+                    if not shape.is_mesh():
+                        raise ValueError(f"{shape.id()} is not a mesh.")
+                    output_file = self.output_dir / "meshes" / f"{shape.id()}.ply"
+                    output_file.parent.mkdir(parents=True, exist_ok=True)
+                    shape.write_ply(str(output_file))
+
+            meshes = list(map(trimesh.load, output_file.parent.iterdir()))
+            mesh = trimesh.util.concatenate(meshes)
+            mesh_file = self.output_dir / "mesh.ply"
+            mesh.export(mesh_file)
 
         loguru.logger.success("Finished!")
 

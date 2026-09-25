@@ -128,9 +128,9 @@ class SSDPConfig(SDFConfig):
     min_var_epsilon: float = 1.0e-6
     prior_initial_var: float = 1.0e-3
     deterministic_end_ratio: float = 0.5
+    survival_approx_end_ratio: float = 1.0
     up_cross_approx_end_ratio: float = 1.0
     up_cross_anneal_end_ratio: float = 1.0
-    survival_approx_end_ratio: float = 1.0
     quadrature_mode: QuadratureMode = QuadratureMode.GL
 
 
@@ -141,13 +141,6 @@ class SSDP(SDF):
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-
-        assert (
-            self.config.deterministic_end_ratio
-            <= self.config.up_cross_approx_end_ratio
-            <= self.config.up_cross_anneal_end_ratio
-            <= self.config.survival_approx_end_ratio
-        )
 
         self.ou_network = torchvision.ops.MLP(
             in_channels=self.config.geo_feat_dim * 2,
@@ -181,14 +174,14 @@ class SSDP(SDF):
     def _is_deterministic(self) -> bool:
         return self.get_progress_ratio() <= self.config.deterministic_end_ratio
 
+    def _is_survival_approx(self) -> bool:
+        return self.get_progress_ratio() <= self.config.survival_approx_end_ratio
+
     def _is_up_cross_approx(self) -> bool:
         return self.get_progress_ratio() <= self.config.up_cross_approx_end_ratio
 
     def _is_up_cross_anneal(self) -> bool:
         return self.get_progress_ratio() <= self.config.up_cross_anneal_end_ratio
-
-    def _is_survival_approx(self) -> bool:
-        return self.get_progress_ratio() <= self.config.survival_approx_end_ratio
 
     def _get_initial_var(self) -> jt.Float[torch.Tensor, " "]:
         initial_var = nn.functional.softplus(self.initial_var)
@@ -245,7 +238,7 @@ class SSDP(SDF):
         return transition_scales, transition_shifts, transition_vars
 
     @jaxtyped()
-    def _get_log_down_zero_cross_prob(
+    def _get_log_down_cross_prob(
         self,
         ssdp_samples: jt.Float[torch.Tensor, " S *R "],
         transition_scales: jt.Float[torch.Tensor, " *R "],
@@ -257,11 +250,11 @@ class SSDP(SDF):
             loc=forward_means,
             scale=torch.sqrt(transition_vars),
         )
-        log_down_zero_cross_probs = forward_kernels.log_cdf(0.0)
-        return log_down_zero_cross_probs
+        log_down_cross_probs = forward_kernels.log_cdf(0.0)
+        return log_down_cross_probs
 
     @jaxtyped()
-    def _get_log_up_zero_cross_prob(
+    def _get_log_up_cross_prob(
         self,
         ssdp_samples: jt.Float[torch.Tensor, " S *R "],
         transition_scales: jt.Float[torch.Tensor, " *R "],
@@ -269,37 +262,40 @@ class SSDP(SDF):
         transition_vars: jt.Float[torch.Tensor, " *R "],
     ) -> jt.Float[torch.Tensor, " S *R "]:
         assert not self._is_up_cross_approx()
+
         forward_means = transition_scales * ssdp_samples + transition_shifts
         forward_kernels = Normal(
             loc=forward_means,
             scale=torch.sqrt(transition_vars),
         )
         xi = 2.0 * transition_scales / transition_vars * ssdp_samples
-        log_up_zero_cross_probs = (
+        log_up_cross_probs = (
             # Eq. (26) in the paper.
             forward_kernels.log_ccdf(xi * forward_kernels.variance)
             + xi * (xi * forward_kernels.variance / 2.0 - forward_kernels.mean)
         )
+
         if self._is_up_cross_anneal():
-            neg_anneal_ratio = self.get_cosine_anneal_ratio(
+            up_cross_anneal_ratio = self.get_cosine_anneal_ratio(
                 start_ratio=self.config.up_cross_approx_end_ratio,
                 end_ratio=self.config.up_cross_anneal_end_ratio,
             )
-            log_up_zero_cross_probs = torch.add(
-                input=log_up_zero_cross_probs,
-                other=math.log(max(neg_anneal_ratio, self.config.pos_val_epsilon)),
+            log_up_cross_probs = torch.add(
+                input=log_up_cross_probs,
+                other=math.log(max(up_cross_anneal_ratio, self.config.pos_val_epsilon)),
             )
-        return log_up_zero_cross_probs
+
+        return log_up_cross_probs
 
     @jaxtyped()
-    def _get_log_zero_cross_prob(
+    def _get_log_cross_prob(
         self,
         ssdp_samples: jt.Float[torch.Tensor, " S *R "],
         transition_scales: jt.Float[torch.Tensor, " *R "],
         transition_shifts: jt.Float[torch.Tensor, " *R "],
         transition_vars: jt.Float[torch.Tensor, " *R "],
     ) -> jt.Float[torch.Tensor, " S *R "]:
-        log_down_zero_cross_probs = self._get_log_down_zero_cross_prob(
+        log_down_cross_probs = self._get_log_down_cross_prob(
             ssdp_samples=ssdp_samples,
             transition_scales=transition_scales,
             transition_shifts=transition_shifts,
@@ -307,21 +303,21 @@ class SSDP(SDF):
         )
 
         if self._is_up_cross_approx():
-            return log_down_zero_cross_probs
+            return log_down_cross_probs
 
-        log_up_zero_cross_probs = self._get_log_up_zero_cross_prob(
+        log_up_cross_probs = self._get_log_up_cross_prob(
             ssdp_samples=ssdp_samples,
             transition_scales=transition_scales,
             transition_shifts=transition_shifts,
             transition_vars=transition_vars,
         )
 
-        log_zero_cross_probs = torch.logaddexp(
-            input=log_down_zero_cross_probs,
-            other=log_up_zero_cross_probs,
+        log_cross_probs = torch.logaddexp(
+            input=log_down_cross_probs,
+            other=log_up_cross_probs,
         )
 
-        return log_zero_cross_probs
+        return log_cross_probs
 
     @jaxtyped()
     def _get_log_snis_weight(
@@ -334,6 +330,9 @@ class SSDP(SDF):
         prior_vars: jt.Float[torch.Tensor, " *R "],
     ) -> jt.Float[torch.Tensor, " S *R "]:
         assert not self._is_survival_approx()
+
+        if self._is_up_cross_approx():
+            return torch.zeros_like(ssdp_samples)
 
         backward_vars = 1.0 / (1.0 / prior_vars + transition_scales**2.0 / transition_vars)
         backward_vars = torch.clamp(backward_vars, min=self.config.min_var_epsilon)
@@ -352,6 +351,16 @@ class SSDP(SDF):
             - backward_kernels.log_ccdf(0.0)
             + xi * (xi * backward_kernels.variance / 2.0 - backward_kernels.mean)
         )
+
+        if self._is_up_cross_anneal():
+            up_cross_anneal_ratio = self.get_cosine_anneal_ratio(
+                start_ratio=self.config.up_cross_approx_end_ratio,
+                end_ratio=self.config.up_cross_anneal_end_ratio,
+            )
+            log_up_snis_weights = torch.add(
+                input=log_up_snis_weights,
+                other=math.log(max(up_cross_anneal_ratio, self.config.pos_val_epsilon)),
+            )
 
         log_snis_weights = log1mexp(
             inputs=log_up_snis_weights,
@@ -435,14 +444,14 @@ class SSDP(SDF):
 
         proposal_distributions = TruncatedPositive(marginal_distributions)
         ssdp_samples = proposal_distributions.icdf(cdf_samples)
-        log_zero_cross_probs = self._get_log_zero_cross_prob(
+        log_cross_probs = self._get_log_cross_prob(
             ssdp_samples=ssdp_samples,
             transition_scales=transition_scales,
             transition_shifts=transition_shifts,
             transition_vars=transition_vars,
         )
-        log_zero_cross_probs = log_zero_cross_probs + log_cdf_weights
-        opacities = torch.sum(torch.exp(log_zero_cross_probs), dim=0)
+        log_cross_probs = log_cross_probs + log_cdf_weights
+        opacities = torch.sum(torch.exp(log_cross_probs), dim=0)
 
         return opacities
 
@@ -503,16 +512,16 @@ class SSDP(SDF):
             log_snis_weights = log_snis_weights + log_cdf_weights
             log_norm_constants = torch.logsumexp(log_snis_weights, dim=0)
 
-            log_zero_cross_probs = self._get_log_zero_cross_prob(
+            log_cross_probs = self._get_log_cross_prob(
                 ssdp_samples=ssdp_samples,
                 transition_scales=transition_scales,
                 transition_shifts=transition_shifts,
                 transition_vars=transition_vars,
             )
-            log_zero_cross_probs = log_zero_cross_probs + log_snis_weights
-            log_zero_cross_probs = torch.logsumexp(log_zero_cross_probs, dim=0)
+            log_cross_probs = log_cross_probs + log_snis_weights
+            log_cross_probs = torch.logsumexp(log_cross_probs, dim=0)
 
-            opacities = torch.exp(log_zero_cross_probs - log_norm_constants)
+            opacities = torch.exp(log_cross_probs - log_norm_constants)
             opacities_list.append(opacities)
 
             log_ssdp_samples = torch.log(ssdp_samples)

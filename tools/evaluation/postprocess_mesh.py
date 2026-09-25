@@ -163,7 +163,7 @@ class MeshPostprocessor:
                 dim=0,
             )
         else:
-            foreground_masks = pose_matrices.new_ones(len(pose_matrices), 1, height, width)
+            foreground_masks = torch.ones(len(meta_data["frames"]), 1, height, width)
 
         mesh = trimesh.load_mesh(self.mesh_file)
 
