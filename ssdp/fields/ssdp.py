@@ -630,3 +630,41 @@ class SSDP(SDF):
             outputs |= {FieldHeadNames.ALPHA: opacities}
 
         return outputs
+
+    @jaxtyped()
+    def get_mc_samples(
+        self,
+        initial_means: jt.Float[torch.Tensor, " *R "],
+        transition_scales: jt.Float[torch.Tensor, " *R S "],
+        transition_shifts: jt.Float[torch.Tensor, " *R S "],
+        transition_vars: jt.Float[torch.Tensor, " *R S "],
+        num_mc_samples: int,
+    ) -> jt.Float[torch.Tensor, " {num_mc_samples} *R S+1 "]:
+        initial_var = self._get_initial_var()
+        initial_distributions = Normal(
+            loc=initial_means,
+            scale=torch.sqrt(initial_var),
+        )
+
+        mc_samples_list = []
+
+        mc_samples = initial_distributions.sample((num_mc_samples,))
+        mc_samples_list.append(mc_samples)
+
+        for transition_scale, transition_shift, transition_var in zip(
+            torch.unbind(transition_scales, dim=-1),
+            torch.unbind(transition_shifts, dim=-1),
+            torch.unbind(transition_vars, dim=-1),
+            strict=True,
+        ):
+            forward_means = transition_scale * mc_samples + transition_shift
+            forward_kernels = Normal(
+                loc=forward_means,
+                scale=torch.sqrt(transition_var),
+            )
+            mc_samples = forward_kernels.sample()
+            mc_samples_list.append(mc_samples)
+
+        mc_samples = torch.stack(mc_samples_list, dim=-1)
+
+        return mc_samples
