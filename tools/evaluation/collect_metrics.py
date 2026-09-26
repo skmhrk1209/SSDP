@@ -30,13 +30,15 @@ class MetricsCollector:
     output_dir: Path | None = None
 
     model_pattern: str = (
-        r"(neus|oav|ssdp)"
+        r"(neus|oav|unis|ssdp)"
         r"(?:-(facto|official))?"
+        r"(?:-(c\d+))?"
         r"(?:-(base|half|double|quarter|quadruple))?"
     )
     scene_pattern: str = (
-        r"(?:neus|oav|ssdp)"
+        r"(?:neus|oav|unis|ssdp)"
         r"(?:-(?:facto|official))?"
+        r"(?:-(?:c\d+))?"
         r"(?:-(?:base|half|double|quarter|quadruple))?"
         r"-(.+)"
     )
