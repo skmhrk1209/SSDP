@@ -53,7 +53,7 @@
 
 **モンテカルロ(MC)参照。** SSDP のパスを各標本区間の細分割点で厳密な遷移核からサンプルし、ゼロ交差を**細分割点での符号だけ**から検出する。検証対象の式(Brownian bridge の交差確率)を参照側に使うと循環するので使わない。符号による検出は細分割の内側の交差を見落とし、m 細分割での検出確率は $P(m)=P+c_1m^{-1/2}+c_2m^{-1}+O(m^{-3/2})$ と振る舞う(細分割の中でドリフトがほぼ一定なとき)。そこで同じパスを 1, 2, 4 個おきに間引いた 3 段(n, n/2, n/4)の検出から $c_1,c_2$ を消して無限細分割へ外挿する(重みは 6.83, −8.24, 2.41)。3 段は同じパスの入れ子なので統計ノイズはほぼ打ち消し合う。
 
-**細分割数と間引きの規則(全実験共通)。** 見落としの大きさは、細分割幅 h を相関長 1/κ で測った κh = κΔt / n で決まる(見落としの総量は 0.58 τ√h × 境界での密度、Broadie–Glasserman–Kou)。規則は 2 つ: (A) 最も細かい段で κh ≤ 1/100、(B) 外挿の最も粗い段(n/4)でも κh ≤ 1/10(展開の前提を守る)。実験中で最も大きい κΔt は exp 1 の κΔt の掃引の上端 10(学習した場は κ = 112、Δt = 1/24 で 4.7、地図は κ = 100 で 4.2)なので、(A) から n = 1000、(B) から間引きの比は 2 以下、で n = 1000・間引き (1, 2, 4) を全実験に使う(κh は最大 0.01 と 0.04)。外挿後の残差は (κh)^{3/2} のオーダーで、相対 10^{−3} 以下(MC の統計誤差より小さい)。
+**細分割数と間引きの規則(全実験共通)。** 見落としの大きさは、細分割幅 h を相関長 1/κ で測った κh = κΔt / n で決まる(見落としの総量は 0.58 τ√h × 境界での密度、Broadie–Glasserman–Kou)。規則は 2 つ: (A) 最も細かい段で κh ≤ 1/100、(B) 外挿の最も粗い段(n/4)でも κh ≤ 1/10(展開の前提を守る)。実験中で最も大きい κΔt は exp 1 の κΔt の掃引の上端 10(学習した場は κ = 112、Δt = 1/24 で 4.7、地図は κ = 100 で 4.2)なので、(A) から n = 1000、(B) から間引きの比は 2 以下、で n = 1000・間引き (1, 2, 4) を全実験に使う(κh は最大 0.01 と 0.04)。外挿後の残差は (κh)^{3/2} のオーダー。その大きさは `check_extrapolation.py` で実測した(2026-09-28): exp 1 の κΔt = 0.1, 1, 10 で細分割を 4 倍(n = 4000、間引き (1, 2, 4, 8, 16)、$10^8$ パス)にし、同じパスから本番の外挿(1000, 500, 250 の段)と細かい外挿(4000, 2000, 1000 の段)を作って、差を本番の標準誤差で割る(残差が (κh)^{3/2} なら差は本番の残差の 7/8)。結果(`data/interval/checks/extrapolation.json`): 主項の次数は −0.49(期待値 −0.5)、残差の次数は κΔt = 10 で連続する外挿の差の比 2.6(n^{−3/2} なら 2.8)。ただし差の統計ノイズは入れ子でも打ち消されず(外挿の重みが段の間の交差を増幅し、それが 2 つの外挿で異なる)、本番の標準誤差の 0.85〜1.1 倍あるので、1 組み合わせごとに 1/3 を検証することはできない(10² 倍のパスが要る)。組み合わせにわたる残差の平均は κΔt = 0.1(112 個)で標準誤差の −0.01 ± 0.08 倍、κΔt = 1(103 個)で −0.18 ± 0.09 倍。κΔt = 10(93 個)では残差が解像し、中央値 1.6 倍、最大 18 倍($\bar\mu_0 = 10$ の稀な交差、相対 7%)で、規則の 1/3 を超える。一方、図が描く誤差(式の誤差、下限は標準誤差の 2 倍)に対する残差の比は κΔt = 10 で最大 0.18(中央値 0.0003)、κΔt = 1 で最大 0.09(中央値 0.002): 上端では式の誤差が標準誤差の $10^3$ 倍以上あるので図には影響しない(規則の扱いは 5 章)。
 
 **距離。** レイ上の実験では、レンダラの first-passage 分布と MC 参照の分布の **Cramér 距離** $\int(F_1(t)-F_2(t))^2dt$(CDF は区間内で線形)を使う。分布は、レイ内でヒットしたという条件で正規化する。正規化は論文の CRPS の評価コード(`tools/evaluation/evaluate_uq_metrics.py`)と同じ手順で、各区間の確率を 1e-6 で下から押さえてから L1 正規化する(必ず分布になり、質量がどこにも無ければ uniform になる)。レンダラ側と MC 側の両方に適用する。
 - 正規化しない分布同士の距離を使わない理由: ヒット確率の差 δ が、表面から遠端までの長さを掛けた δ² として入り、値がレイの遠端の位置に依存する。
@@ -88,7 +88,7 @@
 
 **確率の誤差の次数**(残差からの見積もり。論文が述べているのは残差の次数まで): 交差できるのは始点 $S_0$ が境界からノイズの幅 $\sqrt\Omega$ 以内にある経路だけで、残差はそれを $\Omega^2$ だけ、すなわちその幅の $\Omega^{1.5}$ 倍だけずらす。したがって**相対誤差は $O(\Omega^{1.5})$**。$S_0$ の密度が幅 $\sqrt\Omega$ の上で平らなら(条件: 密度の相対変化 $\bar{\Omega}_i/2\tilde\sigma^2+\tilde\mu_0\sqrt{\bar{\Omega}_i}/\tilde\sigma^2\ll1$)、確率そのものが $O(\Omega^{0.5})$ なので**絶対誤差は $O(\Omega^2)$**(残差と同じ次数)。これはすべての組み合わせの $\Omega\to0$ での極限だが、掃引の範囲では $\tilde\sigma=10$ の組み合わせだけがこの領域にあり、始点分布が幅 $\sqrt\Omega$ の内側に収まる組み合わせ($\tilde\sigma,\tilde\mu_0\lesssim\sqrt{\bar{\Omega}_i}$)では確率が O(1) で絶対誤差も $O(\Omega^{1.5})$、境界が遠く密度の裾が届かない組み合わせでは $e^{-2\tilde\mu_0^2/\bar{\Omega}_i}$ で急減する。float64、1000 細分割・間引き (1, 2, 4)(2.1 節の規則)。$R(t)=e^{-\kappa t}R(0)+Z(t)$ と分解し、同じ $Z$ と同じ一様乱数(切断正規分布の逆関数に通す)を 144 通りすべてで共有する。パス数は全 $x$ で $10^8$、シードは 1 つ(42)。
 
-**検算**: (i) 同じ無次元群に落ちる 4 つの物理設定 $(\kappa,\tau^2)=(1,2),(10,0.25),(100,0.02),(0.1,8)$ で、MC の推定値と式の値が標準形と一致することを確かめる(`check_invariance.py`)。(ii) 下向き交差の質量は細分割が不要で Eq. (23) が厳密なので、式と MC の差を標準誤差で割った z が標準正規に従うことでパスを検算する。結果は 3.1 節。
+**検算**: (i) 同じ無次元群に落ちる 4 つの物理設定 $(\kappa,\tau^2)=(1,2),(10,0.25),(100,0.02),(0.1,8)$ で、MC の推定値と式の値が標準形と一致することを確かめる(`check_invariance.py`)。(ii) 下向き交差の質量は細分割が不要で Eq. (23) が厳密なので、式と MC の差を標準誤差で割った z が標準正規に従うことでパスを検算する。結果は 3.1 節。(iii) 細分割の外挿の残差は 2.1 節の検算で押さえる。
 
 **図**: 横軸は normalized sampling interval $\Delta\bar{t}_i=\kappa\Delta t$ で、その掃引(11 点)から描く($\bar{\Omega}_i$ の掃引は図にせず、要約の傾きと次数の検証に使う)。縦軸は絶対誤差 |式 − MC|(論文に載せるのはこちら。相対誤差の図も出力する)で、レンジは 5% 点の最小から 95% 点の最大を含む 10 の冪(絶対誤差の上限だけは手で与える。2.6 節)。描くのは、全 11 点で参照の確率が正かつ相対標準誤差 ≤ 1% の組み合わせ(参照の精度だけによる選別で、誤差の大きさでは選別しない)。組み合わせごとの線と、その中央値・25〜75%・5〜95%、MC の標準誤差の 2 倍、$\Delta\bar{t}_i<1$ の 5 点の中央値に log-log で最小二乗で当てはめた直線(傾きを凡例に示す。上の次数との比較は 3.1 節)を描く。
 
@@ -161,7 +161,7 @@
 - **長い区間では消えない。** $\bar{\Omega}_i$ の掃引では中央値が $\bar{\Omega}_i\approx10$ で 1.6e-2 に達して増加が止まる(掃引内の最大 0.866)。$\Delta\bar{t}_i$ の掃引は $\bar{\Omega}_i$ で $5\times10^8$ まで届き、中央値は $\Delta\bar{t}_i=10$ で 0.38、95% 点は 0.96、最大は 0.996($\Delta\bar{t}_i=2.5$、$\tilde\mu_0=1$、$\tilde\sigma=0.1$、$\tilde a=-10$、$\tilde b=10$)。この組み合わせは平均が区間の途中で $-1.5\sigma_{st}$ まで下がって戻り、$\Delta\bar{t}_i\ge1.6$ では両端が正なので線形補間は交差を見ず、真の確率 0.998 に対して式は 0.002〜0.92 になる(薄い構造の失敗。地図の近似 B と同じ機構)。
 - **誤差の符号と係数は $\tilde b-\tilde\mu_0/2$ で決まる(2.2 節の主項)。** $\bar{\Omega}_i=0.1$ での符号付き相対誤差(式 − MC、中央値)は、$\tilde\mu_0=0.1$ で $\tilde b=0$ なら +5e-4、$\tilde b=10$ なら −2.2%(過小)、$\tilde\mu_0=10$ では $\tilde b\le1$ で +1.1〜1.3%(過大)、$\tilde b=10$ で −1.0%。$\tilde\mu_0=1$ では $\tilde b\le0.1$ で正、$\tilde b\ge1$ で負($\tilde b=10$ で −2.3%)。
 - **次数の検証**(2.2 節の見積もりの確認。`summary.log` の checks の節の $(\tilde\sigma,\tilde\mu_0)$ ごとのブロック。母集団の全 $\tilde b$ をまとめ、$\bar{\Omega}_i<1$ の 5 点の中央値で当てはめた傾き): 密度が平らな $\tilde\sigma=10$ で $\tilde\mu_0=0.1$ は 2.05(予測 2)、$\tilde\mu_0=1$ は 1.41、$\tilde\mu_0=10$ は 1.25(補間残差の高次項の係数が $\tilde\mu_0$ に比例して大きく、掃引の範囲では漸近の前段階)。$\tilde\sigma=1$ は 1.89($\tilde\mu_0=0.1$)、1.67($\tilde\mu_0=1$)。境界が遠い $\tilde\sigma=0.1$、$\tilde\mu_0=1$ は 2.96(予測: 2 より急)。$\tilde\sigma=\tilde\mu_0=0.1$ は −0.27 で、この領域の誤差は MC の分解能の中にあり傾きは測れない。
-- **検算**: (i) 4 つの物理設定で MC の推定値はビット単位で一致し、式の差は最大 2e-16。(ii) 下向き交差の z は両掃引 1913 個で標準偏差 1.03、|z| < 2 が 95.4%。
+- **検算**: (i) 4 つの物理設定で MC の推定値はビット単位で一致し、式の差は最大 2e-16。(ii) 下向き交差の z は両掃引 1913 個で標準偏差 1.03、|z| < 2 が 95.4%。(iii) 細分割の外挿の残差(2.1 節): κΔt ≤ 1 では平均で標準誤差の 1/3 以下、κΔt = 10 では中央値 1.6 倍だが図が描く誤差の最大 18%。
 
 ### 3.2 誤差地図
 
@@ -233,15 +233,15 @@
 
 | 内容 | 評価 | 描画 |
 |---|---|---|
-| exp 1 | `bash tools/analysis/evaluate_up_cross_prob.sh <normalized_quadratic_variation または normalized_sampling_interval> <値>`(1 本につき 1 点。省略時は両掃引の 11 点すべて)、検算は `check_invariance.py` と `check_quadrature.py`(下のコードの項) | `bash tools/analysis/plot_up_cross_prob.sh` |
+| exp 1 | `bash tools/analysis/evaluate_up_cross_prob.sh <normalized_quadratic_variation または normalized_sampling_interval> <値>`(1 本につき 1 点。省略時は両掃引の 11 点すべて)、検算は `check_invariance.py`、`check_quadrature.py`、`check_extrapolation.py`(下のコードの項) | `bash tools/analysis/plot_up_cross_prob.sh` |
 | 誤差地図 | `bash tools/analysis/evaluate_approx_error.sh <phases> <scenes>`(省略時は両位相・4 シーン。1 本 = 1 位相 × 1 シーン) | `bash tools/analysis/plot_approx_error.sh <phases> <フォルダの正規表現>`(地図と、学習に沿った誤差の図の両方を描く。指標ごとの共通レンジを全データから計算して渡す) |
 | exp 4 | `bash tools/analysis/evaluate_sdf_error.sh <scenes> <variants>`(K = 1 の 2 シーン × 4 レンダラ、対話ノードの GPU で 1 ラン 1〜2 分)、表は `bash tools/analysis/summarize_sdf_error.sh` | `bash tools/analysis/plot_sdf_error.sh <scenes> <variants>` |
 | 学習に沿った誤差 | `bash tools/analysis/evaluate_training_trajectory.sh <scenes> <variants> <slices>`(1 本 = 1 ラン × 10 チェックポイント。全 160 本)、完了後に `bash tools/analysis/merge_training_trajectory.sh` でランごとに結合 | 同上 |
 
-- コード: `tools/analysis/`(git add で固定。exp 4 の再構成の道具 `evaluate_sdf_error.*`、`plot_sdf_error.*`、`summarize_sdf_error.*` を含む)。`evaluate_approx_error.py` に共通の関数(場の生成 `_create_field`、レンダラの切り替え `_configure_variant`、MC 参照 `_get_reference_cdf_values`、外挿の重み `_get_extrapolation_weights`、正規化 `_normalize_cdf_values`、距離 `_compute_metrics`、スラブ `CuboidConfig`)がある。exp 1 の評価器の入力は $\Delta\bar{t}_i=\kappa\Delta t$ で、$\bar{\Omega}_i$ の掃引は起動スクリプトが換算して渡す(2.2 節)。`check_quadrature.py` は exp 1 の式側の求積の節点数の根拠(2.2 節。`uv run python -m tools.analysis.check_quadrature --output-file outputs/TMLR-toy-analysis/data/interval/checks/quadrature.json`。既定で両掃引の両端と中央を評価する)。`check_invariance.py` は無次元化の検算(2.2 節。`uv run python -m tools.analysis.check_invariance --output-file outputs/TMLR-toy-analysis/data/interval/checks/invariance.json`。4 設定の記録は `data/interval/checks/invariance/` に書く)。`plot_approx_error.py` に図の共通の様式(論文用の PDF、モデルの色と名前)がある。レンダラと MC のサンプラは `ssdp` の実装を import して使っている。
+- コード: `tools/analysis/`(git add で固定。exp 4 の再構成の道具 `evaluate_sdf_error.*`、`plot_sdf_error.*`、`summarize_sdf_error.*` を含む)。`evaluate_approx_error.py` に共通の関数(場の生成 `_create_field`、レンダラの切り替え `_configure_variant`、MC 参照 `_get_reference_cdf_values`、外挿の重み `_get_extrapolation_weights`、正規化 `_normalize_cdf_values`、距離 `_compute_metrics`、スラブ `CuboidConfig`)がある。exp 1 の評価器の入力は $\Delta\bar{t}_i=\kappa\Delta t$ で、$\bar{\Omega}_i$ の掃引は起動スクリプトが換算して渡す(2.2 節)。`check_quadrature.py` は exp 1 の式側の求積の節点数の根拠(2.2 節。`uv run python -m tools.analysis.check_quadrature --output-file outputs/TMLR-toy-analysis/data/interval/checks/quadrature.json`。既定で両掃引の両端と中央を評価する)。`check_invariance.py` は無次元化の検算(2.2 節。`uv run python -m tools.analysis.check_invariance --output-file outputs/TMLR-toy-analysis/data/interval/checks/invariance.json`。4 設定の記録は `data/interval/checks/invariance/` に書く)。`check_extrapolation.py` は MC 参照の細分割の外挿の残差の検算(2.1 節。`uv run python -m tools.analysis.check_extrapolation --output-file outputs/TMLR-toy-analysis/data/interval/checks/extrapolation.json --data-dir outputs/TMLR-toy-analysis/data/interval`。3 点の記録は `data/interval/checks/extrapolation/` に書き、あれば再利用するので、`--normalized-sampling-intervals <値>` で 1 点 1 ジョブに分けてから、引数なしで統計をまとめられる)。`plot_approx_error.py` に図の共通の様式(論文用の PDF、モデルの色と名前)がある。レンダラと MC のサンプラは `ssdp` の実装を import して使っている。
 - データ: `outputs/TMLR-toy-analysis/data/`(図と同じく実験ごとのフォルダに分ける。`summary.log` は exp 1〜3 の数値と検算で、interval と ray にまたがるので最上位に置く)
   - `interval/normalized_quadratic_variation/<Ω̃>.json`、`interval/normalized_sampling_interval/<κΔt>.json`(掃引ごとに 11 ファイル): exp 1。各記録に `normalized_quadratic_variation` と `normalized_sampling_interval` の両方がある
-  - `interval/checks/quadrature.json`: GL の節点数の確認(2.2 節)。`interval/checks/invariance.json`: 無次元化の検算(2.2 節。4 設定の記録は `interval/checks/invariance/`)
+  - `interval/checks/quadrature.json`: GL の節点数の確認(2.2 節)。`interval/checks/invariance.json`: 無次元化の検算(2.2 節。4 設定の記録は `interval/checks/invariance/`)。`interval/checks/extrapolation.json`: 細分割の外挿の残差の検算(2.1 節。3 点の記録は `interval/checks/extrapolation/`)
   - `ray/maps/phase-{0.0,0.5}/<scene>.json`: 121 格子点 × 4 レンダラの、MC との Cramér 距離(`conditional_cramer_distance`)、ヒット確率の二乗距離(`squared_distance`)、ヒット確率(`hit_prob_1` がレンダラ、`hit_prob_2` が MC)、距離の MC 誤差(`<指標>_stderr`、`<指標>_bias`、`hit_prob_2_stderr`。2.1 節)。各格子点の α と γ も記録してある
   - `ray/trajectories/<scene>_<variant>.json`: チェックポイントごとの学習されたパラメータと、距離・その MC 誤差(2.1 節)・ヒット確率のレイにわたる平均・分位(ヒット確率で選別していないので、平均と上位の分位は外れ値の影響を受ける)。`ray/trajectories/slices/` はジョブごとの出力(10 チェックポイント)で、結合の元
   - `sdf/<scene>_<variant>.{json,npz}`、`sdf/summary.log`: exp 4(レイごとの厚さと真の面上の学習 SDF の分位、z = 0 の断面、その表)
@@ -269,6 +269,7 @@ phase のフォルダの地図 3 枚(1 指標分)を本文幅に 1 行で並べ(
 |---|---|---|
 | exp 1(11 + 11 本) | 1 点、144 通り、$10^8$ パス、1000 細分割 | 16〜19 分 |
 | 検算(2 本) | 無次元化: 4 設定 × 72 通り、$10^6$ パス。求積: 6 点 × 144 通り × 4 節点数 | 2〜3 分 |
+| 検算(外挿の残差、3 本) | κΔt = 0.1, 1, 10 の 1 点 1 ジョブ(`--normalized-sampling-intervals <値> --num-mc-chunks 4000`)。144 通り、n = 4000、間引き 5 段、$10^8$ パス | 1 点 95 分 |
 | 地図(8 本) | 1 位相 × 1 シーン、121 格子点、$10^5$ パス、1000 細分割 | 29〜32 分 |
 | 学習(160 本) | 1 ラン × 10 チェックポイント、946〜1930 レイ × $10^3$ パス、1000 細分割 | K = 1: 18〜23 分、K = 3: 36〜47 分 |
 | exp 4(8 ラン、対話ノード) | 6561 レイ × 101 点 + 面 2 × 6561 点 + 断面 1001² | 1〜2 分 |
@@ -276,7 +277,9 @@ phase のフォルダの地図 3 枚(1 指標分)を本文幅に 1 行で並べ(
 
 ## 5. 未決定事項
 
-図のレンジと目盛(2026-09-25 に決定: レンジはデータから、目盛は matplotlib の自動選択、端は目盛に合わせる)を含め、残っている未決定事項はない。
+図のレンジと目盛(2026-09-25 に決定: レンジはデータから、目盛は matplotlib の自動選択、端は目盛に合わせる)は決定済み。残っているのは次の 1 件。
+
+- 細分割の外挿の残差の規則(2.1 節の「描かない誤差は標準誤差の 1/3 以下」)の扱い(2026-09-28 の実測): exp 1 の上端 κΔt = 10 では残差が標準誤差の中央値 1.6 倍・最大 18 倍で規則を超える(図が描く誤差に対しては最大 18%、κΔt ≤ 1 では最大 9%)。規則を「図が描く誤差に対して小さい」に改めて n = 1000 のままにするか、上端の細分割を増やして exp 1 を計算し直すか(最悪の組み合わせを 1/3 に収めるには n を 10 倍以上にする必要がある)。
 
 本文・キャプションで説明する事項(図の問題ではない):
 

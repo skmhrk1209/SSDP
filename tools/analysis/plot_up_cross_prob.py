@@ -98,24 +98,35 @@ def load_records(input_dir: Path) -> pd.DataFrame:
     counts = pd.concat([records[[*names, "num_mc_samples"]], counts], axis=1).groupby(names).sum()
     probs = counts.drop(columns="num_mc_samples").div(counts["num_mc_samples"], axis=0).to_numpy()
 
-    # NOTE: The extrapolation to infinitely many substeps (`_get_extrapolation_weights`). A zero-crossing detected on
-    # thinned-out substeps is also detected on finer ones (the strides are multiples of each other), so that
-    # the extrapolation is a linear combination of the indicators of exclusive events, which gives its variance.
-    weights = _get_extrapolation_weights(sub_sample_strides).numpy()
-    event_probs = probs - np.pad(probs[:, 1:], ((0, 0), (0, 1)))
-    event_coeffs = np.cumsum(weights)
-
     records = (
         records.groupby(names)[["predictive_up_cross_prob"]]
         .first()
         .rename(columns=dict(predictive_up_cross_prob="predictive_prob"))
     )
-    records["reference_prob"] = event_probs @ event_coeffs
-    records["reference_prob_stderr"] = np.sqrt(
-        np.clip(event_probs @ event_coeffs**2.0 - records["reference_prob"] ** 2.0, 0.0, None)
-        / counts["num_mc_samples"]
+    # NOTE: The extrapolation to infinitely many substeps (`_get_extrapolation_weights`).
+    records["reference_prob"], records["reference_prob_stderr"] = get_extrapolation_stats(
+        probs,
+        _get_extrapolation_weights(sub_sample_strides).numpy(),
+        counts["num_mc_samples"].to_numpy(),
     )
     return records.reset_index()
+
+
+def get_extrapolation_stats(
+    probs: np.ndarray, weights: np.ndarray, num_mc_samples: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    # NOTE: A linear combination (the weights) of the probabilities of the zero-crossings detected on the substeps
+    # thinned out by each stride (the columns of the probabilities, from the finest), and its standard error over
+    # the given numbers of paths. A zero-crossing detected on thinned-out substeps is also detected on finer ones
+    # (the strides are multiples of each other), so that the combination is one of the indicators of exclusive
+    # events, which gives its variance exactly.
+    event_probs = probs - np.pad(probs[:, 1:], ((0, 0), (0, 1)))
+    event_coeffs = np.cumsum(weights)
+    values = event_probs @ event_coeffs
+    stderrs = np.sqrt(
+        np.clip(event_probs @ event_coeffs**2.0 - values**2.0, 0.0, None) / num_mc_samples
+    )
+    return values, stderrs
 
 
 def get_resolved_flags(records: pd.DataFrame, max_relative_stderr: float) -> pd.Series:
