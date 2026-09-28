@@ -1,4 +1,4 @@
-DATA_DIR=outputs/TMLR-toy-analysis/data/approx-errors
+DATA_DIR=outputs/TMLR-toy-analysis/data/ray
 
 # NOTE: The slices of the checkpoints of each run (`evaluate_training_trajectory.sh`) are concatenated in the order
 # of the steps into one file per run. The pattern of the slices excludes those of the `*_up` runs from the run

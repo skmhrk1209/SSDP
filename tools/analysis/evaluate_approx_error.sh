@@ -1,4 +1,4 @@
-DATA_DIR=outputs/TMLR-toy-analysis/data/approx-errors
+DATA_DIR=outputs/TMLR-toy-analysis/data/ray
 
 # NOTE: <scene ID> <number of the slabs> <range of their centers> <half width of the slabs>
 SCENES=(

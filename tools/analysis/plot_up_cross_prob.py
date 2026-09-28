@@ -22,10 +22,11 @@ NUM_AXIS_DIGITS = 4
 
 
 class Axis(enum.StrEnum):
-    # NOTE: The length of the interval on the horizontal axis, each swept by `evaluate_up_cross_prob.sh` and recorded
-    # under its name by `evaluate_up_cross_prob.py`: the normalized quadratic variation Omega_i / sigma_st^2 (the
-    # variable in which the interpolation residual of Proposition 3.1 is O(Omega_i^2)), or the normalized sampling
-    # interval kappa dt (the same information, Omega_i / sigma_st^2 = exp(2 kappa dt) - 1).
+    # NOTE: The length of the interval, each swept by `evaluate_up_cross_prob.sh` and recorded under its name by
+    # `evaluate_up_cross_prob.py`: the normalized quadratic variation Omega_i / sigma_st^2 (the variable in which
+    # the interpolation residual of Proposition 3.1 is O(Omega_i^2)), or the normalized sampling interval kappa dt
+    # (the same information, Omega_i / sigma_st^2 = exp(2 kappa dt) - 1). The figure uses the sampling interval;
+    # both sweeps are summarized by `summarize_approx_error.py`.
     NORMALIZED_QUADRATIC_VARIATION = enum.auto()
     NORMALIZED_SAMPLING_INTERVAL = enum.auto()
 
@@ -33,8 +34,8 @@ class Axis(enum.StrEnum):
     def symbol(self) -> str:
         return dict(
             [
-                (Axis.NORMALIZED_QUADRATIC_VARIATION, r"\widetilde{\Omega}"),
-                (Axis.NORMALIZED_SAMPLING_INTERVAL, r"\widetilde{\Delta t}"),
+                (Axis.NORMALIZED_QUADRATIC_VARIATION, r"\bar{\Omega}_i"),
+                (Axis.NORMALIZED_SAMPLING_INTERVAL, r"\Delta \bar{t}_i"),
             ]
         )[self]
 
@@ -55,8 +56,8 @@ class Error(enum.StrEnum):
     # the residual of Proposition 3.1 shifts them by O(Omega_i^2), i.e., by O(Omega_i^1.5) of that width: the relative
     # error is O(Omega_i^1.5). Where the density of S(0) is flat over that width, the probability itself is
     # O(Omega_i^0.5) and the absolute error O(Omega_i^2), the order of the residual (an estimate from the residual,
-    # not a statement of the paper, which states the order of the residual). The guides show these powers of
-    # the horizontal axis (the same powers of kappa dt, to which Omega_i / sigma_st^2 is proportional to first order).
+    # not a statement of the paper, which states the order of the residual). The guides of the figures are fitted
+    # to the medians (`fit_guide`), and their slopes are compared with these orders in `summarize_approx_error.py`.
     ABSOLUTE = enum.auto()
     RELATIVE = enum.auto()
 
@@ -72,10 +73,6 @@ class Error(enum.StrEnum):
     @property
     def file_id(self) -> str:
         return dict([(Error.ABSOLUTE, "abs"), (Error.RELATIVE, "rel")])[self]
-
-    @property
-    def order(self) -> float:
-        return dict([(Error.ABSOLUTE, 2.0), (Error.RELATIVE, 1.5)])[self]
 
 
 def load_records(input_dir: Path) -> pd.DataFrame:
@@ -137,24 +134,36 @@ def pivot_curves(records: pd.DataFrame, values: pd.Series, axis: Axis) -> pd.Dat
     return curves.pivot(index=axis, columns=GROUP_NAMES, values="value")
 
 
+def fit_guide(curves: pd.DataFrame, fit_limit: float) -> tuple[float, float]:
+    # NOTE: The line fitted in log-log by least squares to the median over the columns at the points of the axis
+    # below the limit: its slope and its intercept (the log of the value at one).
+    fit_values = curves.index[curves.index < fit_limit]
+    slope, intercept = np.polyfit(
+        np.log(fit_values), np.log(curves.loc[fit_values].median(axis=1)), 1
+    )
+    return slope, intercept
+
+
 @dataclasses.dataclass
 class UpCrossProbPlotter:
     # NOTE: Error of the probability of the up-crossings of Eq. (26) on a single interval against the Monte Carlo
     # reference of `evaluate_up_cross_prob.py`, as a function of the length of the interval: one figure per error
-    # (`Error`) and per axis (`Axis`, read from `<input_dir>/<axis>/` and saved in `<output_dir>/axis-<axis>/`), with
-    # the vertical range of an error common to its axes.
+    # (`Error`), from the sweep of the axis (`<input_dir>/<axis>/`).
     input_dir: Path
     output_dir: Path
-    axes: tuple[Axis, ...] = tuple(Axis)
+    axis: Axis = Axis.NORMALIZED_SAMPLING_INTERVAL
     # NOTE: The color of the up-crossings in the figures of the paper.
     color: str = "dodgerblue"
     # NOTE: The combinations drawn are those resolved (`get_resolved_flags`) at every point of the sweep: a criterion
     # on the reference alone, never on the error, which would keep its upward fluctuations.
     max_relative_stderr: float = 0.01
     # NOTE: The guide is fitted to the medians at the points of the axis below this value, i.e., in the decade
-    # where the expansion of the interpolation residual holds (`summarize_approx_error.py` fits the slope over the same
-    # points).
+    # where the expansion of the interpolation residual holds (`fit_guide`; `summarize_approx_error.py` reports
+    # the same fit).
     guide_fit_limit: float = 1.0
+    # NOTE: The top of the vertical axis of the absolute error when given (by hand in `plot_up_cross_prob.sh`, for
+    # the figure of the paper); otherwise, like the other ends, the power of ten enclosing the quantiles.
+    max_absolute_error: float | None = None
     # NOTE: The quantiles over the combinations: the band of the quartiles and the wider band, whose ends set
     # the vertical range.
     quantiles: tuple[float, float, float, float, float] = (0.05, 0.25, 0.5, 0.75, 0.95)
@@ -171,10 +180,11 @@ class UpCrossProbPlotter:
         height = width * self.aspect_ratio
         return (width, height)
 
-    def _get_curves(self, axis: Axis) -> dict[Error, tuple[pd.DataFrame, pd.DataFrame]]:
+    def _get_curves(self) -> dict[Error, tuple[pd.DataFrame, pd.DataFrame]]:
         # NOTE: The errors of the drawn combinations against the axis, and the sampling errors of the reference (two
         # standard errors) as their floors. The discretization left after the extrapolation is O(n^(-3/2)), i.e.,
         # smaller than what the extrapolation removes, and is not included.
+        axis = self.axis
         records = load_records(self.input_dir / axis)
         resolved_flags = get_resolved_flags(records, self.max_relative_stderr)
         population = (pivot_curves(records, resolved_flags.astype(float), axis) == 1.0).all()
@@ -200,7 +210,6 @@ class UpCrossProbPlotter:
 
     def _plot(
         self,
-        axis: Axis,
         error: Error,
         curves: pd.DataFrame,
         floors: pd.DataFrame,
@@ -208,9 +217,9 @@ class UpCrossProbPlotter:
         output_file: Path,
     ) -> None:
         # NOTE: One faint line per combination (columns) against the length of the interval (rows), with the median
-        # and the quantiles over the combinations, a guide proportional to the power of the axis of the error, and
-        # the sampling error of the reference (its median, filled from the bottom) below which the values are
-        # dominated by its noise.
+        # and the quantiles over the combinations, the line fitted to the median over the short intervals (its slope
+        # in the legend), and the sampling error of the reference (its median, filled from the bottom) below which
+        # the values are dominated by its noise.
         fig, ax = plt.subplots(figsize=self._get_figure_size())
 
         quantiles = curves.quantile(self.quantiles, axis=1).T
@@ -249,17 +258,11 @@ class UpCrossProbPlotter:
             alpha=0.125,
             linewidth=0.0,
         )
-        # NOTE: The guide has the slope of the order of the error, and the height fitted in log by least squares to
-        # the medians at the points of the axis below `guide_fit_limit`.
+        slope, intercept = fit_guide(curves, self.guide_fit_limit)
         guide_values = curves.index.to_numpy()
-        fit_flags = guide_values < self.guide_fit_limit
-        log_height = np.mean(
-            np.log(quantiles[0.5].to_numpy()[fit_flags])
-            - error.order * np.log(guide_values[fit_flags])
-        )
         (guide_line,) = ax.plot(
             guide_values,
-            np.exp(log_height) * guide_values**error.order,
+            np.exp(intercept) * guide_values**slope,
             color="black",
             linestyle="--",
         )
@@ -276,13 +279,13 @@ class UpCrossProbPlotter:
         ax.set_yscale("log")
         ax.set_xlim(curves.index.min(), curves.index.max())
         ax.set_ylim(min_value, max_value)
-        ax.set_xlabel(axis.label)
+        ax.set_xlabel(self.axis.label)
         ax.set_ylabel(error.label)
         ax.legend(
             handles=[(quartile_band, median_line), guide_line, floor_band],
             labels=[
                 "Proposition 3.1",
-                rf"$\propto {axis.symbol}^{{{error.order:g}}}$",
+                rf"$\propto ({self.axis.symbol})^{{{slope:.2f}}}$",
                 r"MCSE ($\times 2$)",
             ],
             loc="upper left",
@@ -293,35 +296,29 @@ class UpCrossProbPlotter:
     def __call__(self) -> None:
         configure_style(self.font_size)
 
-        curves = {axis: self._get_curves(axis) for axis in self.axes}
-
-        # NOTE: The vertical range of an error, common to its axes: the powers of ten enclosing the smallest lower
-        # quantile and the largest upper quantile over the axes.
-        for error in Error:
-            quantiles = [
-                curves[axis][error][0].quantile([self.quantiles[0], self.quantiles[-1]], axis=1)
-                for axis in self.axes
-            ]
+        # NOTE: The vertical range of an error: the powers of ten enclosing its smallest lower quantile and its largest
+        # upper quantile.
+        for error, (curves, floors) in self._get_curves().items():
+            quantiles = curves.quantile([self.quantiles[0], self.quantiles[-1]], axis=1)
             value_range = (
-                10.0 ** np.floor(np.log10(min(q.iloc[0].min() for q in quantiles))),
-                10.0 ** np.ceil(np.log10(max(q.iloc[1].max() for q in quantiles))),
+                10.0 ** np.floor(np.log10(quantiles.iloc[0].min())),
+                10.0 ** np.ceil(np.log10(quantiles.iloc[1].max())),
             )
+            if error is Error.ABSOLUTE and self.max_absolute_error is not None:
+                value_range = (value_range[0], self.max_absolute_error)
             loguru.logger.info(
                 f"{error}: vertical range {value_range[0]:.3g} to {value_range[1]:.3g}."
             )
-            for axis in self.axes:
-                self._plot(
-                    axis=axis,
-                    error=error,
-                    curves=curves[axis][error][0],
-                    floors=curves[axis][error][1],
-                    value_range=value_range,
-                    output_file=(
-                        self.output_dir
-                        / f"axis-{axis}"
-                        / f"analytic_up_cross_prob_{error.file_id}_error_plot_vs_MC.pdf"
-                    ),
-                )
+            self._plot(
+                error=error,
+                curves=curves,
+                floors=floors,
+                value_range=value_range,
+                output_file=(
+                    self.output_dir
+                    / f"analytic_up_cross_prob_{error.file_id}_error_plot_vs_MC.pdf"
+                ),
+            )
 
 
 if __name__ == "__main__":

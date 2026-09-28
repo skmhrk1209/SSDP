@@ -18,6 +18,7 @@ from tools.analysis.plot_up_cross_prob import (
     GROUP_NAMES,
     Axis,
     UpCrossProbPlotter,
+    fit_guide,
     get_resolved_flags,
     load_records,
     pivot_curves,
@@ -27,8 +28,8 @@ from tools.analysis.plot_up_cross_prob import (
 @dataclasses.dataclass
 class ApproxErrorSummarizer:
     # NOTE: The numbers behind the figures of the three experiments (the tables of the handover), from the data
-    # laid out by the launchers (`evaluate_up_cross_prob.sh`, `evaluate_approx_error.sh` and
-    # `evaluate_training_trajectory.sh`), followed by the checks on the same data. The thresholds are those of
+    # laid out by the launchers in `<data_dir>/interval/` (`evaluate_up_cross_prob.sh`) and `<data_dir>/ray/`
+    # (`evaluate_approx_error.sh` and `evaluate_training_trajectory.sh`), followed by the checks on the same data. The thresholds are those of
     # the plotters, so that the numbers are those of the figures.
     data_dir: Path
     output_file: Path
@@ -50,15 +51,14 @@ class ApproxErrorSummarizer:
     settled_error: float = TrainingTrajectoryPlotter.settled_error
 
     def _fit_slope(self, curves: pd.DataFrame) -> float:
-        # NOTE: The slope of the median in log-log over the points of the axis below the fit limit of the guide of
-        # the plots.
-        small = curves.index[curves.index < self.guide_fit_limit]
-        return np.polyfit(np.log(small), np.log(curves.loc[small].median(axis=1)), 1)[0]
+        # NOTE: The slope of the guide of the plots (`fit_guide`, the median in log-log over the points of the axis
+        # below the fit limit).
+        return fit_guide(curves, self.guide_fit_limit)[0]
 
     def _summarize_sweep(self, axis: Axis) -> tuple[list[str], pd.DataFrame, pd.Series, pd.Series]:
         # NOTE: exp 1 on the axis of a sweep: the population of `plot_up_cross_prob.sh` (the combinations resolved
         # at every point of the sweep).
-        records = load_records(self.data_dir / "up_cross_prob" / axis)
+        records = load_records(self.data_dir / "interval" / axis)
         errors = np.abs(records["predictive_prob"] - records["reference_prob"])
         floors = 2.0 * records["reference_prob_stderr"]
         resolved_flags = get_resolved_flags(records, self.max_relative_stderr)
@@ -93,7 +93,7 @@ class ApproxErrorSummarizer:
     def _summarize_maps(self, phase: str) -> list[str]:
         # NOTE: exp 2 / exp 3: the distances of the four renderers to Monte Carlo on the (kappa, tau) grid.
         maps = {
-            scene_id: load_sweep(self.data_dir / f"maps/phase-{phase}/{scene_id}.json")
+            scene_id: load_sweep(self.data_dir / f"ray/maps/phase-{phase}/{scene_id}.json")
             for scene_id in self.scene_ids
         }
 
@@ -156,7 +156,7 @@ class ApproxErrorSummarizer:
         # NOTE: The error of the renderer used in training along the checkpoints of the learned fields.
         trajectories = {
             (scene_id, variant): load_trajectory(
-                self.data_dir / f"trajectories/{scene_id}_{variant}.json"
+                self.data_dir / f"ray/trajectories/{scene_id}_{variant}.json"
             )
             for scene_id in self.scene_ids
             for variant in self.variants
@@ -224,7 +224,7 @@ class ApproxErrorSummarizer:
             [
                 pd.json_normalize(pd.read_json(path).to_dict("records"))
                 for axis in Axis
-                for path in sorted((self.data_dir / "up_cross_prob" / axis).glob("*.json"))
+                for path in sorted((self.data_dir / "interval" / axis).glob("*.json"))
             ]
         )
         raw = raw[raw["metrics.empirical_down_cross_prob_stderr"] > 0]

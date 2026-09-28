@@ -40,9 +40,9 @@ class SDFErrorPlotter:
     # `plot_sdf_error.sh`), extended to the ticks of the color bar.
     sdf_range: float
     variant: Variant = Variant.NA
-    # NOTE: The ticks of the axes, given by hand for this figure only: the window of the slice is a choice, not
-    # a multiple of the tick steps that matplotlib chooses for it.
-    tick_steps: tuple[float, float] = (0.025, 0.25)
+    # NOTE: The tick steps of the axes when given (by hand in `plot_sdf_error.sh`: the window of the slice is
+    # a choice, not a multiple of the steps that matplotlib chooses for it); otherwise automatic.
+    tick_steps: tuple[float, float] | None = None
 
     # TMLR layout dimensions (from tmlr.sty)
     text_width: float = 6.5
@@ -80,8 +80,9 @@ class SDFErrorPlotter:
             )
         ax.set_xlim(x.min(), x.max())
         ax.set_ylim(y.min(), y.max())
-        for axis, tick_step in zip((ax.xaxis, ax.yaxis), self.tick_steps, strict=True):
-            axis.set_major_locator(ticker.MultipleLocator(tick_step))
+        if self.tick_steps is not None:
+            for axis, tick_step in zip((ax.xaxis, ax.yaxis), self.tick_steps, strict=True):
+                axis.set_major_locator(ticker.MultipleLocator(tick_step))
         ax.set_xlabel("$x$")
         ax.set_ylabel("$y$")
         ax.legend(

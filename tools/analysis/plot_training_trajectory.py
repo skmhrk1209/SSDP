@@ -29,8 +29,8 @@ def get_max_error(trajectory_files: tuple[Path, ...], metric: Metric) -> float:
 class TrainingTrajectoryPlotter:
     # NOTE: `<trajectory_dir>/<scene_id>_<variant>.json` from `evaluate_training_trajectory.py`.
     trajectory_dir: Path
-    # NOTE: For each scene, the plot is saved in the corresponding directory, next to the maps of
-    # `plot_approx_error.py` and with the same size.
+    # NOTE: For each scene, the plot is saved in the corresponding directory, above the folders of the phases with
+    # the maps of `plot_approx_error.py`, at half of the text width.
     scene_ids: tuple[str, ...]
     output_dirs: tuple[Path, ...]
     # NOTE: The vertical range (`get_max_error` over all the runs of the metric, computed by `plot_approx_error.sh`),
@@ -51,6 +51,9 @@ class TrainingTrajectoryPlotter:
     # magnified in an inset, whose vertical range ends at the largest 75% point in it.
     settled_error: float = 1.0e-3
     inset_bounds: tuple[float, float, float, float] = (0.25, 0.2, 0.7, 0.55)
+    # NOTE: The top of the vertical axis of the inset when given (common to the figures, given by hand in
+    # `plot_approx_error.sh`); otherwise the largest 75% point in the window of each figure.
+    max_inset_error: float | None = None
 
     def _get_figure_size(self) -> tuple[float, float]:
         width = self.text_width * self.width_ratio
@@ -110,6 +113,8 @@ class TrainingTrajectoryPlotter:
         inset_ax.set_xlim(min_step, inset_step)
         inset_ax.xaxis.set_major_locator(ticker.MultipleLocator(min_step))
         # NOTE: The vertical ranges end at the ticks.
+        if self.max_inset_error is not None:
+            max_inset_error = self.max_inset_error
         ax.set_ylim(*snap_range(ax.yaxis, (0.0, self.max_error)))
         inset_ax.set_ylim(*snap_range(inset_ax.yaxis, (0.0, max_inset_error)))
         ax.set_xlabel("Training Step")

@@ -270,8 +270,9 @@ class ApproxErrorPlotter:
     # TMLR layout dimensions (from tmlr.sty)
     text_width: float = 6.5
 
-    # NOTE: Half of the text width, with the height to width ratio 1:1.25.
-    width_ratio: float = 0.5
+    # NOTE: A third of the text width, for the three maps of a panel (the distance of each renderer and their
+    # difference) side by side; the height is set by `fit_square_axes`.
+    width_ratio: float = 1.0 / 3.0
     aspect_ratio: float = 0.8
     font_size: float = 8.0
 
@@ -310,7 +311,7 @@ class ApproxErrorPlotter:
             label=f"Difference in {self.metric.label}",
         )
         fit_square_axes(fig, ax)
-        _, max_distance = snap_range(colorbar.ax.yaxis, (-self.max_distance, self.max_distance))
+        _, max_distance = snap_range(colorbar.long_axis, (-self.max_distance, self.max_distance))
         plt.close(fig)
         return max_distance
 
@@ -342,7 +343,9 @@ class ApproxErrorPlotter:
         ax.set_xlabel(AXIS_LABELS[0])
         ax.set_ylabel(AXIS_LABELS[1])
 
-        return ax.figure.colorbar(mesh, ax=ax, extend=extend, label=label)
+        # NOTE: The color bar lies below the map, along its width, so that the map keeps the width of a third of
+        # the text.
+        return ax.figure.colorbar(mesh, ax=ax, extend=extend, label=label, location="bottom")
 
     def _save_map(
         self,

@@ -9,6 +9,9 @@ from tools.analysis.plot_sdf_error import get_sdf_range
 print(get_sdf_range(tuple(sorted(Path('$DATA_DIR/sdf').glob('*.npz'))), (0.05, 0.95)))
 ")
 
+# NOTE: The tick steps of the axes, given by hand (the window of the slice is not a multiple of the automatic steps).
+TICK_STEPS="0.025 0.25"
+
 # NOTE: The slice of the learned SDF of every run of `evaluate_sdf_error.sh`, in the folders of the scenes
 # (`K-<number of the slabs>/W-<width of the slab>`) as the figures of `plot_approx_error.sh`.
 for SCENE_ID in ${1:-k1_w0.05 k1_w0.025}; do
@@ -20,6 +23,7 @@ for SCENE_ID in ${1:-k1_w0.05 k1_w0.025}; do
             --output-dir $FIGS_DIR/sdf/$FOLDER \
             --scene-id $SCENE_ID \
             --sdf-range $SDF_RANGE \
-            --variant $(tr a-z A-Z <<< $VARIANT)
+            --variant $(tr a-z A-Z <<< $VARIANT) \
+            --tick-steps $TICK_STEPS
     done
 done

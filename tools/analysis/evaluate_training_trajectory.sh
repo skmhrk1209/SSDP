@@ -1,4 +1,4 @@
-DATA_DIR=outputs/TMLR-toy-analysis/data/approx-errors
+DATA_DIR=outputs/TMLR-toy-analysis/data/ray
 RUNS_DIR=outputs/TMLR-toy-analysis/ssdp-facto-half
 DATASET_DIR=datasets/nerfstudio/sdfstudio/toy/cuboid
 

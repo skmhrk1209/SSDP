@@ -1,4 +1,4 @@
-DATA_DIR=outputs/TMLR-toy-analysis/data/approx-errors
+DATA_DIR=outputs/TMLR-toy-analysis/data
 
 # NOTE: The numbers behind the figures of the three experiments and the checks on the data of exp 1, from
 # the data of `evaluate_up_cross_prob.sh`, `evaluate_approx_error.sh` and `evaluate_training_trajectory.sh`
