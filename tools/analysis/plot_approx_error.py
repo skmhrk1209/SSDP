@@ -66,11 +66,15 @@ VARIANT_COLORS = {
 }
 
 
-def get_variant_name(variant: Variant) -> str:
+def get_variant_marks(variant: Variant) -> str:
     # NOTE: Whether the renderer models the survival event and the up-crossing event.
     survival_mark = r"\xmark" if variant.is_survival_approx else r"\cmark"
     up_cross_mark = r"\xmark" if variant.is_up_cross_approx else r"\cmark"
-    return rf"SSDP-Facto ($\mathcal{{A}}$ {survival_mark}, $\mathcal{{B}}^{{\uparrow}}$ {up_cross_mark})"
+    return rf"($\mathcal{{A}}$ {survival_mark}, $\mathcal{{B}}^{{\uparrow}}$ {up_cross_mark})"
+
+
+def get_variant_name(variant: Variant) -> str:
+    return f"SSDP-Facto {get_variant_marks(variant)}"
 
 
 def get_variant_id(variant: Variant) -> str:
@@ -115,18 +119,21 @@ def snap_range(
     return value_range
 
 
-def fit_square_axes(fig: plt.Figure, ax: plt.Axes, tolerance: float = 2.0e-3) -> None:
-    # NOTE: The height of the figure set so that the axes is square: its width is what the layout gives it, and
-    # the decorations around it do not depend on the size of the figure. Used instead of a box aspect so that
-    # a color bar attached to the axes, which the layout gives the height of the axes, matches it.
+def fit_axes(
+    fig: plt.Figure, ax: plt.Axes, aspect_ratio: float = 1.0, tolerance: float = 2.0e-3
+) -> None:
+    # NOTE: The height of the figure set so that the height of the axes is the given ratio of its width (square by
+    # default): its width is what the layout gives it, and the decorations around it do not depend on the size of
+    # the figure. Used instead of a box aspect so that a color bar attached to the axes, which the layout gives
+    # the height of the axes, matches it.
     for _ in range(10):
         fig.canvas.draw()
         position = ax.get_position()
         width, height = fig.get_size_inches()
         axes_width, axes_height = position.width * width, position.height * height
-        if abs(axes_width - axes_height) < tolerance:
+        if abs(axes_height - aspect_ratio * axes_width) < tolerance:
             break
-        fig.set_size_inches(width, height + axes_width - axes_height)
+        fig.set_size_inches(width, height + aspect_ratio * axes_width - axes_height)
 
 
 def save_figure(fig: plt.Figure, output_file: Path, dpi: int = 600) -> None:
@@ -271,7 +278,7 @@ class ApproxErrorPlotter:
     text_width: float = 6.5
 
     # NOTE: A third of the text width, for the three maps of a panel (the distance of each renderer and their
-    # difference) side by side; the height is set by `fit_square_axes`.
+    # difference) side by side; the height is set by `fit_axes`.
     width_ratio: float = 1.0 / 3.0
     aspect_ratio: float = 0.8
     font_size: float = 8.0
@@ -310,7 +317,7 @@ class ApproxErrorPlotter:
             extend="both",
             label=f"Difference in {self.metric.label}",
         )
-        fit_square_axes(fig, ax)
+        fit_axes(fig, ax)
         _, max_distance = snap_range(colorbar.long_axis, (-self.max_distance, self.max_distance))
         plt.close(fig)
         return max_distance
@@ -375,7 +382,7 @@ class ApproxErrorPlotter:
                 annotated_step=self.annotated_step,
                 font_size=self.font_size,
             )
-        fit_square_axes(fig, ax)
+        fit_axes(fig, ax)
         save_figure(fig, output_file)
 
     def _get_trajectory_file(self, scene_id: str, variant: Variant) -> Path | None:

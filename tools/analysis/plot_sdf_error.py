@@ -11,9 +11,9 @@ from tools.analysis.evaluate_approx_error import Variant
 from tools.analysis.plot_approx_error import (
     VARIANT_COLORS,
     configure_style,
-    fit_square_axes,
+    fit_axes,
     get_variant_id,
-    get_variant_name,
+    get_variant_marks,
     plt,
     save_figure,
     snap_range,
@@ -90,15 +90,17 @@ class SDFErrorPlotter:
                 Line2D([], [], color="black", linestyle="-"),
                 Line2D([], [], color="black", linestyle="--"),
             ],
-            labels=[get_variant_name(self.variant), "Ground Truth"],
-            # NOTE: Above the axes (which the slab fills from end to end), in one column so that the layout does
-            # not narrow the axes to the width of the legend.
+            labels=[get_variant_marks(self.variant), "GT"],
+            # NOTE: Above the axes (which the slab fills from end to end), in one row narrower than the axes (the
+            # columns closer than the default), so that the layout does not narrow the axes to the width of the legend.
             loc="lower left",
             bbox_to_anchor=(0.0, 1.0),
+            ncol=2,
+            columnspacing=1.0,
             frameon=False,
         )
         colorbar = fig.colorbar(mesh, ax=ax, extend="both", label="Learned Signed Distance")
-        fit_square_axes(fig, ax)
+        fit_axes(fig, ax)
         # NOTE: The color scale ends at the ticks of the color bar (whose length is set above).
         mesh.set_clim(*snap_range(colorbar.ax.yaxis, (-self.sdf_range, self.sdf_range)))
         save_figure(fig, self.output_dir / f"learned_sdf_slice_{get_variant_id(self.variant)}.pdf")

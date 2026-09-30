@@ -116,12 +116,22 @@ class SDFErrorEvaluator:
         )
         return torch.sum(fractions * torch.diff(x), dim=-1)
 
+    def _summarize_thicknesses(self, thicknesses: torch.Tensor) -> dict:
+        return dict(
+            true_thickness=2.0 * self.cuboid_config.radii[0],
+            thickness=self._summarize(thicknesses),
+            num_vanished_rays=int((thicknesses == 0.0).sum()),
+            num_rays=len(thicknesses),
+        )
+
     @torch.no_grad()
-    def _evaluate_thickness(self, field: SSDP, matrix: torch.Tensor) -> list[dict]:
+    def _evaluate_thickness(self, field: SSDP, matrix: torch.Tensor) -> tuple[list[dict], dict]:
+        # NOTE: The thickness on the rays of each slab, and pooled over the rays of all the slabs (the statistics of
+        # the run; the same as the slab's for a single slab).
         device = field.aabb.device
         y, z = self._get_grid(device)
 
-        slabs = []
+        slabs, all_thicknesses = [], []
         for slab_x, _, _ in self.cuboid_config.positions:
             x = torch.linspace(
                 slab_x - self.search_half_width,
@@ -136,16 +146,9 @@ class SDFErrorEvaluator:
             thicknesses = self._get_negative_lengths(
                 x, self._get_sdf_values(field, matrix, positions).flatten(0, 1)
             )
-            slabs.append(
-                dict(
-                    center=slab_x,
-                    true_thickness=2.0 * self.cuboid_config.radii[0],
-                    thickness=self._summarize(thicknesses),
-                    num_vanished_rays=int((thicknesses == 0.0).sum()),
-                    num_rays=len(thicknesses),
-                )
-            )
-        return slabs
+            slabs.append(dict(center=slab_x, **self._summarize_thicknesses(thicknesses)))
+            all_thicknesses.append(thicknesses)
+        return slabs, self._summarize_thicknesses(torch.cat(all_thicknesses))
 
     @torch.no_grad()
     def _evaluate_faces(self, field: SSDP, matrix: torch.Tensor) -> dict[str, dict]:
@@ -193,6 +196,7 @@ class SDFErrorEvaluator:
         _, pipeline, _, step = eval_setup(self.config_file)
         field: SSDP = pipeline.model.field
         matrix = get_world_to_model_matrix(pipeline)
+        slabs, all_slabs = self._evaluate_thickness(field, matrix)
 
         record = dict(
             config=dict(
@@ -205,7 +209,8 @@ class SDFErrorEvaluator:
                 world_to_model_matrix=matrix.tolist(),
             ),
             metrics=dict(
-                slabs=self._evaluate_thickness(field, matrix),
+                slabs=slabs,
+                all_slabs=all_slabs,
                 faces=self._evaluate_faces(field, matrix),
             ),
         )

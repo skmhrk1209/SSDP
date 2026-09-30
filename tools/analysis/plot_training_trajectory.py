@@ -1,6 +1,7 @@
 import dataclasses
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import tyro
 from matplotlib import ticker
@@ -10,8 +11,9 @@ from tools.analysis.plot_approx_error import (
     VARIANT_COLORS,
     Metric,
     configure_style,
+    fit_axes,
     get_variant_id,
-    get_variant_name,
+    get_variant_marks,
     load_trajectory,
     plt,
     save_figure,
@@ -33,8 +35,8 @@ class TrainingTrajectoryPlotter:
     # the maps of `plot_approx_error.py`, at half of the text width.
     scene_ids: tuple[str, ...]
     output_dirs: tuple[Path, ...]
-    # NOTE: The vertical range (`get_max_error` over all the runs of the metric, computed by `plot_approx_error.sh`),
-    # common to all the figures of the metric.
+    # NOTE: The top of the vertical axis (`get_max_error` over the runs of the two renderers, computed by
+    # `plot_approx_error.sh`), common to the figures of the pair.
     max_error: float
     # NOTE: The renderer without the approximation of interest, and the one with it.
     variants: tuple[Variant, Variant] = (Variant.BF_UP, Variant.NA)
@@ -44,18 +46,21 @@ class TrainingTrajectoryPlotter:
     text_width: float = 6.5
 
     width_ratio: float = 0.5
-    aspect_ratio: float = 0.8
+    # NOTE: The ratio of the height of the axes to its width (`fit_axes`); the figure is as high as that takes.
+    aspect_ratio: float = 0.5
     font_size: float = 8.0
 
     # NOTE: The steps until the errors of all the renderers have settled below this, and one more checkpoint, are
     # magnified in an inset, whose vertical range ends at the largest 75% point in it.
     settled_error: float = 1.0e-3
     inset_bounds: tuple[float, float, float, float] = (0.25, 0.2, 0.7, 0.55)
-    # NOTE: The top of the vertical axis of the inset when given (common to the figures, given by hand in
-    # `plot_approx_error.sh`); otherwise the largest 75% point in the window of each figure.
+    # NOTE: The top of the vertical axis of the inset when given (that of the main axis, common to the figures of
+    # the pair, passed by `plot_approx_error.sh`), with the ticks of the main axis so that it ends at a tick whatever
+    # the height of the inset; otherwise the largest 75% point in the window of each figure, with automatic ticks.
     max_inset_error: float | None = None
 
     def _get_figure_size(self) -> tuple[float, float]:
+        # NOTE: The initial size; the height is then set by `fit_axes`.
         width = self.text_width * self.width_ratio
         height = width * self.aspect_ratio
         return (width, height)
@@ -112,18 +117,26 @@ class TrainingTrajectoryPlotter:
         ax.set_xlim(0, max_step)
         inset_ax.set_xlim(min_step, inset_step)
         inset_ax.xaxis.set_major_locator(ticker.MultipleLocator(min_step))
-        # NOTE: The vertical ranges end at the ticks.
-        if self.max_inset_error is not None:
-            max_inset_error = self.max_inset_error
-        ax.set_ylim(*snap_range(ax.yaxis, (0.0, self.max_error)))
-        inset_ax.set_ylim(*snap_range(inset_ax.yaxis, (0.0, max_inset_error)))
         ax.set_xlabel("Training Step")
         ax.set_ylabel(self.metric.label)
+        # NOTE: In one row, in the free space above the inset.
         ax.legend(
             handles=handles,
-            labels=[get_variant_name(variant) for variant in self.variants],
+            labels=[get_variant_marks(variant) for variant in self.variants],
             loc="upper right",
+            ncol=len(handles),
         )
+        # NOTE: The vertical ranges end at the ticks, which depend on the height of the axes: the range of the main
+        # axis is snapped once the height is set for its decorations, and again in case its tick labels changed
+        # the layout. The inset does not take part in the layout and is set up last.
+        for _ in range(2):
+            ax.set_ylim(*snap_range(ax.yaxis, (0.0, self.max_error)))
+            fit_axes(fig, ax, self.aspect_ratio)
+        if self.max_inset_error is not None:
+            (tick_step, *_) = np.diff(ax.yaxis.get_majorticklocs())
+            inset_ax.yaxis.set_major_locator(ticker.MultipleLocator(tick_step))
+            max_inset_error = self.max_inset_error
+        inset_ax.set_ylim(*snap_range(inset_ax.yaxis, (0.0, max_inset_error)))
 
         save_figure(fig, output_file)
 
