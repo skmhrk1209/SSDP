@@ -1,4 +1,5 @@
 import dataclasses
+import enum
 from typing import Any, override
 
 import jaxtyping as jt
@@ -28,24 +29,21 @@ class SphereTracerConfig:
     distance_threshold: float = 1.0e-3
 
 
+class ColorDistributionType(enum.StrEnum):
+    NORMAL = enum.auto()
+    LAPLACE = enum.auto()
+
+
 @dataclasses.dataclass
 class SurfaceModelMixinConfig(SurfaceModelConfig):
     anneal_end_step: int = 50000
-    nlml_beta_anneal_min_value: float = 0.1
-    nlml_beta_anneal_max_value: float = 1.0
-    nlml_beta_anneal_end_ratio: float = 0.0
+    nll_color_loss_mult: float = 1.0
     nlml_color_loss_mult: float = 0.0
-    volume_color_loss_mult: float = 1.0
-    surface_color_loss_mult: float = 0.0
-    train_sphere_tracer: SphereTracerConfig = dataclasses.field(
-        default_factory=lambda: SphereTracerConfig(
-            num_iterations=100,
-        ),
-    )
-    eval_sphere_tracer: SphereTracerConfig = dataclasses.field(
-        default_factory=lambda: SphereTracerConfig(
-            num_iterations=1000,
-        ),
+    color_distribution_type: ColorDistributionType = ColorDistributionType.LAPLACE
+    color_distribution_scale: float = 1.0
+    effective_sample_size: int | None = None
+    sphere_tracer: SphereTracerConfig = dataclasses.field(
+        default_factory=SphereTracerConfig,
     )
 
 
@@ -104,15 +102,10 @@ class SurfaceModelMixin(SurfaceModel):
             far_plane=min(self.config.far_plane, self.config.far_plane_bg),
         )
 
-        self.train_sphere_tracer = SphereTracer(
+        self.sphere_tracer = SphereTracer(
             scene_box=self.scene_box,
-            num_iterations=self.config.train_sphere_tracer.num_iterations,
-            distance_threshold=self.config.train_sphere_tracer.distance_threshold,
-        )
-        self.eval_sphere_tracer = SphereTracer(
-            scene_box=self.scene_box,
-            num_iterations=self.config.eval_sphere_tracer.num_iterations,
-            distance_threshold=self.config.eval_sphere_tracer.distance_threshold,
+            num_iterations=self.config.sphere_tracer.num_iterations,
+            distance_threshold=self.config.sphere_tracer.distance_threshold,
         )
         self.normal_estimator = NormalEstimator()
 
@@ -156,8 +149,7 @@ class SurfaceModelMixin(SurfaceModel):
         if ray_bundle.nears is not None:
             ray_origins = ray_origins + ray_directions * ray_bundle.nears
 
-        sphere_tracer = self.train_sphere_tracer if self.training else self.eval_sphere_tracer
-        surface_positions, foreground_masks = sphere_tracer(
+        surface_positions, foreground_masks = self.sphere_tracer(
             sdf=self.field.sdf,
             ray_origins=ray_origins,
             ray_directions=ray_directions,
@@ -203,6 +195,44 @@ class SurfaceModelMixin(SurfaceModel):
         outputs.update(ray_bundle=ray_bundle)
         return outputs
 
+    def _get_color_distribution(
+        self,
+        *args: Any,
+        **kwargs: Any,
+    ) -> torch.distributions.Distribution:
+        if self.config.color_distribution_type is ColorDistributionType.NORMAL:
+            ColorDistribution = torch.distributions.Normal
+        elif self.config.color_distribution_type is ColorDistributionType.LAPLACE:
+            ColorDistribution = torch.distributions.Laplace
+        color_distribution = ColorDistribution(
+            *args,
+            **kwargs,
+            scale=self.config.color_distribution_scale,
+        )
+        return color_distribution
+
+    @jaxtyped()
+    def _reduce_by_ess(
+        self,
+        losses: jt.Float[torch.Tensor, " *B "],
+    ) -> jt.Float[torch.Tensor, " "]:
+        loss = torch.mean(losses)
+        if self.config.effective_sample_size:
+            loss = loss * self.config.effective_sample_size
+        return loss
+
+    @jaxtyped()
+    def _nll_color_loss(
+        self,
+        mean_colors: jt.Float[torch.Tensor, " *B 3 "],
+        target_colors: jt.Float[torch.Tensor, " *B 3 "],
+    ) -> jt.Float[torch.Tensor, " "]:
+        color_distributions = self._get_color_distribution(mean_colors)
+        nll_color_losses = -color_distributions.log_prob(target_colors)
+        nll_color_losses = torch.sum(nll_color_losses, dim=-1)
+        nll_color_loss = self._reduce_by_ess(nll_color_losses)
+        return nll_color_loss
+
     @jaxtyped()
     def _nlml_color_loss(
         self,
@@ -226,98 +256,13 @@ class SurfaceModelMixin(SurfaceModel):
             ],
             dim=-2,
         )
-
-        nlml_beta_anneal_ratio = self.field.get_cosine_anneal_ratio(
-            end_ratio=self.config.nlml_beta_anneal_end_ratio,
-        )
-        nlml_beta_anneal_min_value = mean_colors.new_tensor(self.config.nlml_beta_anneal_min_value)
-        nlml_beta_anneal_max_value = mean_colors.new_tensor(self.config.nlml_beta_anneal_max_value)
-        nlml_beta = torch.lerp(
-            input=nlml_beta_anneal_min_value,
-            end=nlml_beta_anneal_max_value,
-            weight=nlml_beta_anneal_ratio,
-        )
-
-        laplace_distributions = torch.distributions.Laplace(mean_colors, nlml_beta)
+        color_distributions = self._get_color_distribution(mean_colors)
         log_mixture_weights = torch.log(torch.clamp(mixture_weights, min=1.0e-6))
-        nll_color_losses = -laplace_distributions.log_prob(target_colors.unsqueeze(-2))
+        nll_color_losses = -color_distributions.log_prob(target_colors.unsqueeze(-2))
         nll_color_losses = torch.sum(nll_color_losses, dim=-1, keepdim=True)
         nlml_color_losses = -torch.logsumexp(log_mixture_weights - nll_color_losses, dim=-2)
-        nlml_color_loss = torch.mean(nlml_color_losses) * nlml_beta
-
+        nlml_color_loss = self._reduce_by_ess(nlml_color_losses)
         return nlml_color_loss
-
-    @jaxtyped()
-    def _surface_color_loss(
-        self,
-        ray_bundle: RayBundle,
-        ray_samples: RaySamples,
-        sdf_values: jt.Float[torch.Tensor, " *B S 1 "],
-        sdf_gradients: jt.Float[torch.Tensor, " *B S 3 "],
-        background_colors: jt.Float[torch.Tensor, " *B 3 "],
-        target_colors: jt.Float[torch.Tensor, " *B 3 "],
-    ) -> jt.Float[torch.Tensor, " "]:
-        prev_sdf_values = sdf_values[..., :-1, :]
-        next_sdf_values = sdf_values[..., 1:, :]
-
-        intersection_masks = (prev_sdf_values * next_sdf_values) <= 0.0
-        intersection_indices = torch.argmax(intersection_masks.long(), dim=-2, keepdim=True)
-
-        ray_intervals = torch.clamp(ray_samples.deltas[..., :-1, :], min=1.0e-6)
-        sdf_gradients = (next_sdf_values - prev_sdf_values) / ray_intervals
-
-        surface_distances = torch.gather(
-            input=ray_samples.frustums.starts,
-            index=intersection_indices,
-            dim=-2,
-        )
-        surface_distances = surface_distances.squeeze(-2)
-
-        sdf_values = torch.gather(
-            input=sdf_values,
-            index=intersection_indices,
-            dim=-2,
-        )
-        sdf_values = sdf_values.squeeze(-2)
-
-        sdf_gradients = torch.gather(
-            input=sdf_gradients,
-            index=intersection_indices,
-            dim=-2,
-        )
-        sdf_gradients = sdf_gradients.squeeze(-2)
-
-        sdf_gradients = torch.where(
-            condition=sdf_gradients >= 0.0,
-            input=torch.clamp(sdf_gradients, min=+1.0e-6),
-            other=torch.clamp(sdf_gradients, max=-1.0e-6),
-        )
-        surface_distances = surface_distances - sdf_values / sdf_gradients
-
-        ray_bundle = dataclasses.replace(ray_bundle, nears=surface_distances)
-        foreground_masks = torch.any(intersection_masks, dim=-2)
-
-        _, _, surface_colors, foreground_masks = self._sphere_trace(
-            ray_bundle=ray_bundle,
-            foreground_masks=foreground_masks,
-            aabb_initialization=False,
-        )
-        surface_colors = torch.where(
-            condition=foreground_masks,
-            input=surface_colors,
-            other=background_colors,
-        )
-        surface_color_losses = nn.functional.l1_loss(
-            input=surface_colors,
-            target=target_colors,
-            reduction="none",
-        )
-        surface_color_loss = torch.div(
-            input=torch.sum(surface_color_losses * foreground_masks),
-            other=torch.clamp(torch.sum(foreground_masks), min=1.0e-6),
-        )
-
-        return surface_color_loss
 
     @jaxtyped()
     def _eikonal_loss(
@@ -339,18 +284,24 @@ class SurfaceModelMixin(SurfaceModel):
         inputs: dict[str, Any],
         metrics: dict[str, torch.Tensor] | None = None,
     ) -> dict[str, torch.Tensor]:
-        losses = super().get_loss_dict(outputs, inputs, metrics)
 
-        volume_color_loss: torch.Tensor = losses.pop("rgb_loss")
-        volume_color_loss = volume_color_loss * self.config.volume_color_loss_mult
-        losses.update(volume_color_loss=volume_color_loss)
+        losses = {}
 
         if self.training:
-            if self.config.nlml_color_loss_mult or self.config.surface_color_loss_mult:
-                target_colors: torch.Tensor = inputs["image"]
-                target_colors = self.renderer_rgb.blend_background(target_colors)
-                target_colors = target_colors.to(self.device)
+            target_colors: torch.Tensor = inputs["image"]
+            target_colors = self.renderer_rgb.blend_background(target_colors)
+            target_colors = target_colors.to(self.device)
 
+            if self.config.nll_color_loss_mult:
+                mean_colors: torch.Tensor = outputs["rgb"]
+                nll_color_loss = self._nll_color_loss(mean_colors, target_colors)
+                nll_color_loss = nll_color_loss * self.config.nll_color_loss_mult
+                losses.update(nll_color_loss=nll_color_loss)
+
+            if self.config.nlml_color_loss_mult:
+                foreground_colors: torch.Tensor = outputs["field_outputs"][FieldHeadNames.RGB]
+                foreground_weights: torch.Tensor = outputs["weights"]
+                background_weights: torch.Tensor = outputs["bg_transmittance"]
                 background_colors: torch.Tensor | None = outputs.get("bg_rgb")
                 if background_colors is None:
                     background_colors = self.renderer_rgb.get_background_color(
@@ -358,11 +309,6 @@ class SurfaceModelMixin(SurfaceModel):
                         shape=(*target_colors.shape[:-1], 3),
                         device=target_colors.device,
                     )
-
-            if self.config.nlml_color_loss_mult:
-                foreground_colors: torch.Tensor = outputs["field_outputs"][FieldHeadNames.RGB]
-                foreground_weights: torch.Tensor = outputs["weights"]
-                background_weights: torch.Tensor = outputs["bg_transmittance"]
                 nlml_color_loss = self._nlml_color_loss(
                     foreground_colors=foreground_colors,
                     foreground_weights=foreground_weights,
@@ -372,22 +318,6 @@ class SurfaceModelMixin(SurfaceModel):
                 )
                 nlml_color_loss = nlml_color_loss * self.config.nlml_color_loss_mult
                 losses.update(nlml_color_loss=nlml_color_loss)
-
-            if self.config.surface_color_loss_mult:
-                ray_bundle: RayBundle = outputs["ray_bundle"]
-                ray_samples: RaySamples = outputs["ray_samples"]
-                sdf_values: torch.Tensor = outputs["field_outputs"][FieldHeadNames.SDF]
-                sdf_gradients: torch.Tensor = outputs["field_outputs"][FieldHeadNames.GRADIENT]
-                surface_color_loss = self._surface_color_loss(
-                    ray_bundle=ray_bundle,
-                    ray_samples=ray_samples,
-                    sdf_values=sdf_values,
-                    sdf_gradients=sdf_gradients,
-                    background_colors=background_colors,
-                    target_colors=target_colors,
-                )
-                surface_color_loss = surface_color_loss * self.config.surface_color_loss_mult
-                losses.update(surface_color_loss=surface_color_loss)
 
             if self.config.eikonal_loss_mult:
                 losses.pop("eikonal_loss")

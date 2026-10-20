@@ -23,41 +23,35 @@ def _create_trainer_config(
     )
     target_trainer_config = target_trainer_config or source_trainer_config
     target_model_config: SurfaceModelConfig = target_trainer_config.pipeline.model
+    model_config = NeuSFactoConfig(
+        **dict(
+            _asdict(target_model_config),
+            sdf_field=SSDPConfig(
+                **dict(
+                    _asdict(target_model_config.sdf_field),
+                    num_layers_ou=target_model_config.sdf_field.num_layers_color,
+                    bias=0.2,
+                    inside_outside=False,
+                ),
+            ),
+            near_plane=0.0,
+            far_plane=5.0,
+            background_model="mlp",
+            eikonal_loss_mult=0.1,
+            nll_color_loss_mult=0.0,
+            nlml_color_loss_mult=1.0,
+        ),
+    )
     trainer_config = dataclasses.replace(
         source_trainer_config,
         method_name=method_name,
         pipeline=dataclasses.replace(
             source_trainer_config.pipeline,
-            model=NeuSFactoConfig(
-                **dict(
-                    _asdict(target_model_config),
-                    sdf_field=SSDPConfig(
-                        **dict(
-                            _asdict(target_model_config.sdf_field),
-                            num_layers_ou=target_model_config.sdf_field.num_layers_color,
-                            bias=0.2,
-                            inside_outside=False,
-                        ),
-                    ),
-                    near_plane=0.0,
-                    far_plane=5.0,
-                    background_model="mlp",
-                    nlml_color_loss_mult=1.0,
-                    volume_color_loss_mult=0.0,
-                ),
-            ),
+            model=model_config,
         ),
     )
     return trainer_config
 
-
-config = MethodSpecification(
-    config=_create_trainer_config(
-        method_name="ssdp-facto",
-        source_trainer_config=method_configs["neus-facto"],
-    ),
-    description="SSDP-Facto",
-)
 
 for suffix, scale_factor in dict(
     base=1.0,

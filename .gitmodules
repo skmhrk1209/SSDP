@@ -4,3 +4,6 @@
 [submodule "external/lego_eval"]
 	path = external/lego_eval
 	url = https://github.com/ActiveVisionLab/MobileBrick.git
+[submodule "external/triposg"]
+	path = external/triposg
+	url = https://github.com/VAST-AI-Research/TripoSG.git
