@@ -41,6 +41,7 @@ class SurfaceModelMixinConfig(SurfaceModelConfig):
     nlml_color_loss_mult: float = 0.0
     color_distribution_type: ColorDistributionType = ColorDistributionType.LAPLACE
     color_distribution_scale: float = 1.0
+    effective_sample_size_ray: int = 1
     sphere_tracer: SphereTracerConfig = dataclasses.field(
         default_factory=SphereTracerConfig,
     )
@@ -219,7 +220,8 @@ class SurfaceModelMixin(SurfaceModel):
         color_distributions = self._get_color_distribution(mean_colors)
         nll_color_losses = -color_distributions.log_prob(target_colors)
         nll_color_losses = torch.sum(nll_color_losses, dim=-1)
-        nll_color_loss = torch.sum(nll_color_losses)
+        nll_color_loss = torch.mean(nll_color_losses)
+        nll_color_loss = nll_color_loss * self.config.effective_sample_size_ray
         return nll_color_loss
 
     @jaxtyped()
@@ -250,7 +252,8 @@ class SurfaceModelMixin(SurfaceModel):
         nll_color_losses = -color_distributions.log_prob(target_colors.unsqueeze(-2))
         nll_color_losses = torch.sum(nll_color_losses, dim=-1, keepdim=True)
         nlml_color_losses = -torch.logsumexp(log_mixture_weights - nll_color_losses, dim=-2)
-        nlml_color_loss = torch.sum(nlml_color_losses)
+        nlml_color_loss = torch.mean(nlml_color_losses)
+        nlml_color_loss = nlml_color_loss * self.config.effective_sample_size_ray
         return nlml_color_loss
 
     @jaxtyped()

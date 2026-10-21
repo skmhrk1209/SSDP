@@ -25,6 +25,8 @@ class DAPSMixinConfig(SurfaceModelConfig):
     max_noise_level_anneal: float = 10.0
     min_noise_level_anneal: float = 0.1
     min_noise_level_pfode: float = 0.001
+    effective_sample_size_field: int = 1
+    effective_sample_size_latent: int = 1
     coupling_scale_mult: float = 1.0
     sdf_resolution: int = 64
     sdf_chunk_size: int = 1 << 18
@@ -180,10 +182,13 @@ class DAPSMixin(SurfaceModel):
     def _coupling_loss(self) -> jt.Float[torch.Tensor, " "]:
         if self.field.config.mcmc_space is MCMCSpace.LATENT:
             coupling_losses = -self.coupling_distributions.log_prob(self.field.latents)
+            coupling_loss = torch.mean(coupling_losses)
+            coupling_loss = coupling_loss * self.config.effective_sample_size_latent
         elif self.field.config.mcmc_space is MCMCSpace.FIELD:
             sdf_grid = self._discretize_sdf(self.field.sdf)
             coupling_losses = -self.coupling_distributions.log_prob(sdf_grid)
-        coupling_loss = torch.sum(coupling_losses)
+            coupling_loss = torch.mean(coupling_losses)
+            coupling_loss = coupling_loss * self.config.effective_sample_size_field
         return coupling_loss
 
     @override

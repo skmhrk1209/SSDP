@@ -30,6 +30,8 @@ class MAPMixinConfig(SurfaceModelConfig):
     num_steps_latent: int = 10
     max_noise_level_anneal: float = 10.0
     min_noise_level_anneal: float = 0.1
+    effective_sample_size_field: int = 1
+    effective_sample_size_latent: int = 1
     coupling_scale_mult: float = 1.0
     sdf_resolution: int = 64
     sdf_chunk_size: int = 1 << 18
@@ -181,7 +183,8 @@ class MAPMixin(SurfaceModel):
     @jaxtyped()
     def _latent_prior_loss(self) -> jt.Float[torch.Tensor, " "]:
         latent_prior_losses = -self.latent_prior_distributions.log_prob(self.field.latents)
-        latent_prior_loss = torch.sum(latent_prior_losses)
+        latent_prior_loss = torch.mean(latent_prior_losses)
+        latent_prior_loss = latent_prior_loss * self.config.effective_sample_size_latent
         return latent_prior_loss
 
     @jaxtyped()
@@ -191,15 +194,17 @@ class MAPMixin(SurfaceModel):
             noise_level=self.noise_level,
         )
         coupling_losses = -coupling_distributions.log_prob(self.sdf_grid)
-        coupling_loss = torch.sum(coupling_losses)
+        coupling_loss = torch.mean(coupling_losses)
+        coupling_loss = coupling_loss * self.config.effective_sample_size_field
         return coupling_loss
 
     @jaxtyped()
     def _field_coupling_loss(self) -> jt.Float[torch.Tensor, " "]:
         sdf_grid = self._discretize_sdf(self.field.sdf)
-        denoising_posterior_losses = -self.coupling_distributions.log_prob(sdf_grid)
-        denoising_posterior_loss = torch.sum(denoising_posterior_losses)
-        return denoising_posterior_loss
+        field_coupling_losses = -self.coupling_distributions.log_prob(sdf_grid)
+        field_coupling_loss = torch.mean(field_coupling_losses)
+        field_coupling_loss = field_coupling_loss * self.config.effective_sample_size_field
+        return field_coupling_loss
 
     @override
     def get_loss_dict(
