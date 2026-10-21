@@ -4,7 +4,7 @@ import jaxtyping as jt
 import torch
 import torch.nn as nn
 import trimesh
-from scipy.spatial.transform import RigidTransform
+from scipy.spatial.transform import RigidTransform, Rotation
 
 from .aliases import SDFType
 from .jaxtyping import jaxtyped
@@ -55,10 +55,10 @@ class SimilarityTransform(nn.Module):
 
     def _transform_mesh(self, mesh: trimesh.Trimesh) -> trimesh.Trimesh:
         rigid_transform = RigidTransform.from_components(
-            rotation=self.rotation.cpu().numpy(),
+            rotation=Rotation.from_matrix(self.rotation.cpu().numpy()),
             translation=self.translation.cpu().numpy(),
         ).as_matrix()
-        mesh = mesh.apply_scale(self.scale)
+        mesh = mesh.apply_scale(self.scale.item())
         mesh = mesh.apply_transform(rigid_transform)
         return mesh
 

@@ -1,13 +1,12 @@
 import dataclasses
 
 from nerfstudio.configs.method_configs import method_configs
-from nerfstudio.engine.schedulers import MultiStepSchedulerConfig
 from nerfstudio.engine.trainer import TrainerConfig
 from nerfstudio.models.base_surface_model import SurfaceModelConfig
 from nerfstudio.plugins.types import MethodSpecification
 from ssdp.fields import LDMSSDPConfig
 from ssdp.models import DAPSNeuSConfig
-from ssdp.optimizers import PSGLDConfig
+from ssdp.optimizers import PSGHMCConfig
 
 from ._base import _create_trainer_config as _create_base_trainer_config
 from ._utils import _asdict
@@ -32,7 +31,7 @@ def _create_trainer_config(
                 **dict(
                     _asdict(target_model_config.sdf_field),
                     num_layers_ou=target_model_config.sdf_field.num_layers_color,
-                    bias=0.2,
+                    bias=0.5,
                     inside_outside=False,
                 ),
             ),
@@ -44,8 +43,6 @@ def _create_trainer_config(
             nlml_color_loss_mult=1.0,
         ),
     )
-    num_steps_train = source_trainer_config.max_num_iterations
-    num_steps_mcmc = num_steps_train // model_config.num_steps_anneal
     trainer_config = dataclasses.replace(
         source_trainer_config,
         method_name=method_name,
@@ -56,12 +53,8 @@ def _create_trainer_config(
         optimizers=dict(
             source_trainer_config.optimizers,
             mcmc=dict(
-                optimizer=PSGLDConfig(lr=1.0e-4),
-                scheduler=MultiStepSchedulerConfig(
-                    max_steps=num_steps_train,
-                    gamma=0.01 ** (1.0 / (model_config.num_steps_anneal - 1)),
-                    milestones=tuple(range(num_steps_mcmc, num_steps_train, num_steps_mcmc)),
-                ),
+                optimizer=PSGHMCConfig(lr=1.0e-4),
+                scheduler=None,
             ),
         ),
     )

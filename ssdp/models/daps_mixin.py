@@ -21,13 +21,13 @@ from ssdp.utils.jaxtyping import jaxtyped
 @dataclasses.dataclass
 class DAPSMixinConfig(SurfaceModelConfig):
     seed: int = 0
-    num_steps_anneal: int = 50
-    num_steps_pfode: int = 2
+    num_steps_anneal: int = 100
+    num_steps_pfode: int = 10
     max_noise_level_anneal: float = 10.0
     min_noise_level_anneal: float = 0.1
     min_noise_level_pfode: float = 0.001
-    denoising_scale_mult: float = 1.0
-    sdf_resolution: int = 128
+    denoising_scale_mult: float = 1.0e-2
+    sdf_resolution: int = 64
     sdf_chunk_size: int = 1 << 18
 
 
