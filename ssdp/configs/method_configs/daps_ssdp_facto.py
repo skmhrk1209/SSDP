@@ -53,11 +53,17 @@ def _create_trainer_config(
         optimizers=dict(
             source_trainer_config.optimizers,
             field=dict(
-                optimizer=PSGHMCConfig(lr=1.0e-4),
+                optimizer=PSGHMCConfig(
+                    lr=1.0e-4,
+                    temperature=1.0,
+                ),
                 scheduler=None,
             ),
             latent=dict(
-                optimizer=PSGHMCConfig(lr=1.0e-4),
+                optimizer=PSGHMCConfig(
+                    lr=1.0e-4,
+                    temperature=1.0,
+                ),
                 scheduler=None,
             ),
             nuisance=source_trainer_config.optimizers.pop("fields"),

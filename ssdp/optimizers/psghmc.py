@@ -14,6 +14,7 @@ class PSGHMCConfig(OptimizerConfig):
     )
     momentum: float = 0.0
     alpha: float = 0.99
+    temperature: float = 1.0
 
     def setup(self, params: ParamsT) -> torch.optim.Optimizer:
         return self._target(
@@ -22,6 +23,7 @@ class PSGHMCConfig(OptimizerConfig):
             momentum=self.momentum,
             alpha=self.alpha,
             eps=self.eps,
+            temperature=self.temperature,
         )
 
 
@@ -33,11 +35,12 @@ class PSGHMC(torch.optim.SGD):
         momentum: float = 0.0,
         alpha: float = 0.99,
         eps: float = 1.0e-8,
+        temperature: float = 1.0,
     ) -> None:
         super().__init__(params, lr=lr, momentum=momentum)
-        self.defaults.update(alpha=alpha, eps=eps)
+        self.defaults.update(alpha=alpha, eps=eps, temperature=temperature)
         for group in self.param_groups:
-            group.update(alpha=alpha, eps=eps)
+            group.update(alpha=alpha, eps=eps, temperature=temperature)
 
     @torch.no_grad()
     def step(self) -> None:
@@ -46,6 +49,7 @@ class PSGHMC(torch.optim.SGD):
 
             lr = group["lr"]
             momentum = group["momentum"]
+            temperature = group["temperature"]
 
             for param in group["params"]:
                 param: nn.Parameter
@@ -57,9 +61,10 @@ class PSGHMC(torch.optim.SGD):
 
                 noise = torch.randn_like(param.grad)
                 preconditioner = self._get_preconditioner(param, group)
+                noise_scale = (2.0 * (1.0 - momentum) * temperature / lr * preconditioner).sqrt()
 
                 param.grad.mul_(preconditioner)
-                param.grad.add_(noise * (2.0 * (1.0 - momentum) * preconditioner / lr).sqrt())
+                param.grad.add_(noise_scale * noise)
 
         super().step()
 

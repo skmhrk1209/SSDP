@@ -15,14 +15,31 @@ class SGHMCConfig(OptimizerConfig):
         default_factory=lambda: SGHMC,
     )
     momentum: float = 0.0
+    temperature: float = 1.0
 
     def setup(self, params: ParamsT) -> torch.optim.Optimizer:
-        return self._target(params, lr=self.lr, momentum=self.momentum)
+        return self._target(
+            params,
+            lr=self.lr,
+            momentum=self.momentum,
+            temperature=self.temperature,
+        )
 
 
 class SGHMC(PSGHMC):
-    def __init__(self, params: ParamsT, lr: float, momentum: float = 0.0) -> None:
-        super().__init__(params, lr=lr, momentum=momentum)
+    def __init__(
+        self,
+        params: ParamsT,
+        lr: float,
+        momentum: float = 0.0,
+        temperature: float = 1.0,
+    ) -> None:
+        super().__init__(
+            params,
+            lr=lr,
+            momentum=momentum,
+            temperature=temperature,
+        )
 
     def _init_state(self, param: torch.Tensor) -> None:
         pass

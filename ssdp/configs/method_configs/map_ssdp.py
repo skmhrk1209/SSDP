@@ -1,12 +1,12 @@
 import dataclasses
 
 from nerfstudio.configs.method_configs import method_configs
-from nerfstudio.engine.optimizers import AdamOptimizerConfig
 from nerfstudio.engine.trainer import TrainerConfig
 from nerfstudio.models.base_surface_model import SurfaceModelConfig
 from nerfstudio.plugins.types import MethodSpecification
 from ssdp.fields import LDMSSDPConfig
 from ssdp.models.map_neus import MAPNeuSConfig
+from ssdp.optimizers import PSGHMCConfig
 
 from ._base import _create_trainer_config as _create_base_trainer_config
 from ._utils import _asdict
@@ -53,11 +53,17 @@ def _create_trainer_config(
         optimizers=dict(
             source_trainer_config.optimizers,
             field=dict(
-                optimizer=AdamOptimizerConfig(lr=1.0e-4),
+                optimizer=PSGHMCConfig(
+                    lr=1.0e-4,
+                    temperature=0.0,
+                ),
                 scheduler=None,
             ),
             latent=dict(
-                optimizer=AdamOptimizerConfig(lr=1.0e-4),
+                optimizer=PSGHMCConfig(
+                    lr=1.0e-4,
+                    temperature=0.0,
+                ),
                 scheduler=None,
             ),
             nuisance=source_trainer_config.optimizers.pop("fields"),

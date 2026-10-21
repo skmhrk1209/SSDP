@@ -32,7 +32,7 @@ class LatentInitSource(enum.StrEnum):
 @dataclasses.dataclass
 class MAPMixinConfig(SurfaceModelConfig):
     num_steps_anneal: int = 100
-    num_steps_latent: int = 10
+    num_steps_latent: int = 100
     num_steps_pfode: int = 10
     max_noise_level_anneal: float = 10.0
     min_noise_level_anneal: float = 0.1

@@ -14,6 +14,7 @@ class PSGLDConfig(OptimizerConfig):
         default_factory=lambda: PSGLD,
     )
     alpha: float = 0.99
+    temperature: float = 1.0
 
     def setup(self, params: ParamsT) -> torch.optim.Optimizer:
         return self._target(
@@ -21,6 +22,7 @@ class PSGLDConfig(OptimizerConfig):
             lr=self.lr,
             alpha=self.alpha,
             eps=self.eps,
+            temperature=self.temperature,
         )
 
 
@@ -31,6 +33,7 @@ class PSGLD(PSGHMC):
         lr: float,
         alpha: float = 0.99,
         eps: float = 1.0e-8,
+        temperature: float = 1.0,
     ) -> None:
         super().__init__(
             params,
@@ -38,4 +41,5 @@ class PSGLD(PSGHMC):
             momentum=0.0,
             alpha=alpha,
             eps=eps,
+            temperature=temperature,
         )
