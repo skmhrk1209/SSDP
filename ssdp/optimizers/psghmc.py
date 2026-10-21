@@ -12,7 +12,7 @@ class PSGHMCConfig(OptimizerConfig):
     _target: type = dataclasses.field(
         default_factory=lambda: PSGHMC,
     )
-    momentum: float = 0.0
+    momentum: float = 0.9
     alpha: float = 0.99
     temperature: float = 1.0
 

@@ -14,7 +14,7 @@ class SGHMCConfig(OptimizerConfig):
     _target: type = dataclasses.field(
         default_factory=lambda: SGHMC,
     )
-    momentum: float = 0.0
+    momentum: float = 0.9
     temperature: float = 1.0
 
     def setup(self, params: ParamsT) -> torch.optim.Optimizer:
