@@ -24,17 +24,25 @@ class OptimizationPhase(enum.StrEnum):
     FIELD = enum.auto()
 
 
+class LatentInitSource(enum.StrEnum):
+    FIELD = enum.auto()
+    PFODE = enum.auto()
+
+
 @dataclasses.dataclass
 class MAPMixinConfig(SurfaceModelConfig):
     num_steps_anneal: int = 100
     num_steps_latent: int = 10
+    num_steps_pfode: int = 10
     max_noise_level_anneal: float = 10.0
     min_noise_level_anneal: float = 0.1
-    effective_sample_size_field: int = 1
-    effective_sample_size_latent: int = 1
+    min_noise_level_pfode: float = 0.001
+    effective_sample_size_field: float = 1.0
+    effective_sample_size_latent: float = 1.0
     coupling_scale_mult: float = 1.0
     sdf_resolution: int = 64
     sdf_chunk_size: int = 1 << 18
+    latent_init_source: LatentInitSource = LatentInitSource.FIELD
 
 
 class MAPMixin(SurfaceModel):
@@ -144,17 +152,31 @@ class MAPMixin(SurfaceModel):
             else:
                 self.field.ldm.condition()
             with torch.no_grad():
-                latents = self.field.encode()
-                self.field.latents.copy_(latents)
+                if self.config.latent_init_source is LatentInitSource.FIELD:
+                    latents = self.field.encode()
+                    self.field.latents.copy_(latents)
+                elif self.config.latent_init_source is LatentInitSource.PFODE:
+                    noise_level = self.noise_levels[0, ...]
+                    noisy_latents = self.field.ldm.forward_sde(
+                        latents=self.field.latents,
+                        noise_level=noise_level,
+                    )
+                    denoised_latents = self.field.ldm.reverse_pfode(
+                        noisy_latents=noisy_latents,
+                        max_noise_level=noise_level,
+                        min_noise_level=noise_level.new_tensor(self.config.min_noise_level_pfode),
+                        num_ode_steps=self.config.num_steps_pfode,
+                    )
+                    self.field.latents.copy_(denoised_latents)
 
         def on_latent_phase_start(step: int) -> None:
             annealing_step = step // num_steps_stage
-            noise_level = self.noise_levels[annealing_step]
+            noise_level = self.noise_levels[annealing_step, ...]
             self._on_latent_phase_start(noise_level)
 
         def on_field_phase_start(step: int) -> None:
             annealing_step = step // num_steps_stage
-            noise_level = self.noise_levels[annealing_step]
+            noise_level = self.noise_levels[annealing_step, ...]
             self._on_field_phase_start(noise_level)
 
         callbacks.extend(

@@ -41,7 +41,7 @@ class SurfaceModelMixinConfig(SurfaceModelConfig):
     nlml_color_loss_mult: float = 0.0
     color_distribution_type: ColorDistributionType = ColorDistributionType.LAPLACE
     color_distribution_scale: float = 1.0
-    effective_sample_size_ray: int = 1
+    effective_sample_size_ray: float = 1.0
     sphere_tracer: SphereTracerConfig = dataclasses.field(
         default_factory=SphereTracerConfig,
     )
