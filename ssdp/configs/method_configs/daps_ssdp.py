@@ -52,10 +52,15 @@ def _create_trainer_config(
         ),
         optimizers=dict(
             source_trainer_config.optimizers,
-            mcmc=dict(
+            field=dict(
                 optimizer=PSGHMCConfig(lr=1.0e-4),
                 scheduler=None,
             ),
+            latent=dict(
+                optimizer=PSGHMCConfig(lr=1.0e-4),
+                scheduler=None,
+            ),
+            nuisance=source_trainer_config.optimizers.pop("fields"),
         ),
     )
     return trainer_config

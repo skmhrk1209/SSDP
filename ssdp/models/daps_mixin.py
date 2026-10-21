@@ -20,13 +20,12 @@ from ssdp.utils.jaxtyping import jaxtyped
 
 @dataclasses.dataclass
 class DAPSMixinConfig(SurfaceModelConfig):
-    seed: int = 0
     num_steps_anneal: int = 100
     num_steps_pfode: int = 10
     max_noise_level_anneal: float = 10.0
     min_noise_level_anneal: float = 0.1
     min_noise_level_pfode: float = 0.001
-    denoising_scale_mult: float = 1.0e-2
+    coupling_scale_mult: float = 1.0
     sdf_resolution: int = 64
     sdf_chunk_size: int = 1 << 18
 
@@ -34,37 +33,31 @@ class DAPSMixinConfig(SurfaceModelConfig):
 class DAPSMixin(SurfaceModel):
     config: DAPSMixinConfig
     field: LDMMixin
-    noisy_latents: torch.Tensor
-    denoising_posterior: torch.distributions.Distribution
-    max_noise_level_anneal: torch.Tensor
-    min_noise_level_anneal: torch.Tensor
-    min_noise_level_pfode: torch.Tensor
+    noise_levels: torch.Tensor
+    coupling_distributions: torch.distributions.Distribution
 
     @override
     def populate_modules(self) -> None:
         super().populate_modules()
-        self.register_buffer(
-            name="max_noise_level_anneal",
-            tensor=torch.as_tensor(self.config.max_noise_level_anneal),
-            persistent=False,
+        noise_levels = edm_noise_levels(
+            max_noise_level=torch.as_tensor(self.config.max_noise_level_anneal),
+            min_noise_level=torch.as_tensor(self.config.min_noise_level_anneal),
+            num_ode_steps=self.config.num_steps_anneal,
         )
         self.register_buffer(
-            name="min_noise_level_anneal",
-            tensor=torch.as_tensor(self.config.min_noise_level_anneal),
-            persistent=False,
-        )
-        self.register_buffer(
-            name="min_noise_level_pfode",
-            tensor=torch.as_tensor(self.config.min_noise_level_pfode),
+            name="noise_levels",
+            tensor=noise_levels,
             persistent=False,
         )
 
     @override
     def get_param_groups(self) -> dict[str, list[nn.Parameter]]:
         param_groups = super().get_param_groups()
+        param_groups.pop("fields")
         param_groups.update(
-            mcmc=list(self.field.mcmc_parameters()),
-            fields=list(self.field.nuisance_parameters()),
+            field=list(self.field.field_parameters()),
+            latent=list(self.field.latent_parameters()),
+            nuisance=list(self.field.nuisance_parameters()),
         )
         return param_groups
 
@@ -89,11 +82,7 @@ class DAPSMixin(SurfaceModel):
     @jaxtyped()
     def _discretize_sdf(self, sdf: SDFType) -> jt.Float[torch.Tensor, " D H W "]:
         positions = (
-            torch.linspace(
-                *range,
-                self.config.sdf_resolution + 1,
-                device=self.device,
-            )[..., :-1]
+            torch.linspace(*range, self.config.sdf_resolution + 1, device=self.device)[..., :-1]
             for range in self.field.aabb.T
         )
         positions = torch.stack(torch.meshgrid(*positions, indexing="ij"), dim=-1)
@@ -103,26 +92,25 @@ class DAPSMixin(SurfaceModel):
         return sdf_values
 
     @jaxtyped()
-    @torch.no_grad()
-    def _get_denoising_posterior(
+    def _get_coupling_distribution(
         self,
-        denoised_latents: jt.Float[torch.Tensor, " L C "],
-        denoising_scale: jt.Float[torch.Tensor, " "],
+        latents: jt.Float[torch.Tensor, " L C "],
+        noise_level: jt.Float[torch.Tensor, " "],
     ) -> torch.distributions.Distribution:
         if self.field.config.mcmc_space is MCMCSpace.LATENT:
-            denoising_posterior = torch.distributions.Normal(
-                loc=denoised_latents,
-                scale=denoising_scale,
+            coupling_distributions = torch.distributions.Normal(
+                loc=latents,
+                scale=noise_level,
             )
         elif self.field.config.mcmc_space is MCMCSpace.FIELD:
-            sdf = self.field.decode(denoised_latents)
+            sdf = self.field.decode(latents)
             sdf_grid = self._discretize_sdf(sdf)
             sdf_grid = self._redistance_sdf(sdf_grid)
-            denoising_posterior = torch.distributions.Normal(
+            coupling_distributions = torch.distributions.Normal(
                 loc=sdf_grid,
-                scale=denoising_scale,
+                scale=noise_level * self.config.coupling_scale_mult,
             )
-        return denoising_posterior
+        return coupling_distributions
 
     @torch.no_grad()
     def _on_mcmc_start(self, noise_level: jt.Float[torch.Tensor, " "]) -> None:
@@ -133,13 +121,13 @@ class DAPSMixin(SurfaceModel):
         denoised_latents = self.field.ldm.reverse_pfode(
             noisy_latents=noisy_latents,
             max_noise_level=noise_level,
-            min_noise_level=self.min_noise_level_pfode,
+            min_noise_level=noise_level.new_tensor(self.config.min_noise_level_pfode),
             num_ode_steps=self.config.num_steps_pfode,
         )
         self.field.latents.copy_(denoised_latents)
-        self.denoising_posterior = self._get_denoising_posterior(
-            denoised_latents=denoised_latents,
-            denoising_scale=noise_level * self.config.denoising_scale_mult,
+        self.coupling_distributions = self._get_coupling_distribution(
+            latents=denoised_latents,
+            noise_level=noise_level,
         )
 
     @torch.no_grad()
@@ -169,13 +157,7 @@ class DAPSMixin(SurfaceModel):
             if step:
                 self._on_mcmc_end()
             annealing_step = step // num_steps_mcmc
-            noise_levels = edm_noise_levels(
-                max_noise_level=self.max_noise_level_anneal,
-                min_noise_level=self.min_noise_level_anneal,
-                num_ode_steps=self.config.num_steps_anneal,
-                device=self.device,
-            )
-            noise_level = noise_levels[annealing_step]
+            noise_level = self.noise_levels[annealing_step]
             self._on_mcmc_start(noise_level)
 
         callbacks.extend(
@@ -195,14 +177,14 @@ class DAPSMixin(SurfaceModel):
         return callbacks
 
     @jaxtyped()
-    def _denoising_posterior_loss(self) -> jt.Float[torch.Tensor, " "]:
+    def _coupling_loss(self) -> jt.Float[torch.Tensor, " "]:
         if self.field.config.mcmc_space is MCMCSpace.LATENT:
-            denoising_posterior_losses = -self.denoising_posterior.log_prob(self.field.latents)
+            coupling_losses = -self.coupling_distributions.log_prob(self.field.latents)
         elif self.field.config.mcmc_space is MCMCSpace.FIELD:
             sdf_grid = self._discretize_sdf(self.field.sdf)
-            denoising_posterior_losses = -self.denoising_posterior.log_prob(sdf_grid)
-        denoising_posterior_loss = torch.mean(denoising_posterior_losses)
-        return denoising_posterior_loss
+            coupling_losses = -self.coupling_distributions.log_prob(sdf_grid)
+        coupling_loss = torch.sum(coupling_losses)
+        return coupling_loss
 
     @override
     def get_loss_dict(
@@ -212,7 +194,6 @@ class DAPSMixin(SurfaceModel):
         metrics: dict[str, torch.Tensor] | None = None,
     ) -> dict[str, torch.Tensor]:
         losses = super().get_loss_dict(outputs, inputs, metrics)
-        if self.training:
-            denoising_posterior_loss = self._denoising_posterior_loss()
-            losses.update(denoising_posterior_loss=denoising_posterior_loss)
+        coupling_loss = self._coupling_loss()
+        losses.update(coupling_loss=coupling_loss)
         return losses

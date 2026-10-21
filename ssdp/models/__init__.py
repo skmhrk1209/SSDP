@@ -1,6 +1,9 @@
 from .daps_mixin import DAPSMixin, DAPSMixinConfig
 from .daps_neus import DAPSNeuS, DAPSNeuSConfig
 from .daps_neus_facto import DAPSNeuSFacto, DAPSNeuSFactoConfig
+from .map_mixin import MAPMixin, MAPMixinConfig
+from .map_neus import MAPNeuS, MAPNeuSConfig
+from .map_neus_facto import MAPNeuSFacto, MAPNeuSFactoConfig
 from .neus import NeuS, NeuSConfig
 from .neus_facto import NeuSFacto, NeuSFactoConfig
 from .surface_model_mixin import SurfaceModelMixin, SurfaceModelMixinConfig

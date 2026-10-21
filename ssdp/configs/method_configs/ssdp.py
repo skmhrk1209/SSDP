@@ -1,6 +1,7 @@
 import dataclasses
 
 from nerfstudio.configs.method_configs import method_configs
+from nerfstudio.data.datamanagers.base_datamanager import VanillaDataManagerConfig
 from nerfstudio.engine.trainer import TrainerConfig
 from nerfstudio.models.base_surface_model import SurfaceModelConfig
 from nerfstudio.plugins.types import MethodSpecification
@@ -21,6 +22,7 @@ def _create_trainer_config(
         base_trainer_config=source_trainer_config,
         scale_factor=scale_factor,
     )
+    source_data_config: VanillaDataManagerConfig = source_trainer_config.pipeline.datamanager
     target_trainer_config = target_trainer_config or source_trainer_config
     target_model_config: SurfaceModelConfig = target_trainer_config.pipeline.model
     model_config = NeuSConfig(
@@ -40,6 +42,7 @@ def _create_trainer_config(
             eikonal_loss_mult=0.1,
             nll_color_loss_mult=0.0,
             nlml_color_loss_mult=1.0,
+            color_distribution_scale=source_data_config.train_num_rays_per_batch,
         ),
     )
     trainer_config = dataclasses.replace(

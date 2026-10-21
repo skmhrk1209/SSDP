@@ -63,15 +63,11 @@ class LDMMixin(SDF):
             )
             self.transform = SimilarityTransform(scale, rotation, translation)
 
-        if self.config.mcmc_space is MCMCSpace.LATENT:
-            if self.config.latent_file is None:
-                latents = torch.zeros(*self.ldm.latent_shape)
-            else:
-                latents = torch.load(self.config.latent_file)
-            self.register_parameter("latents", nn.Parameter(latents))
-        elif self.config.mcmc_space is MCMCSpace.FIELD:
+        if self.config.latent_file is None:
             latents = torch.zeros(*self.ldm.latent_shape)
-            self.register_buffer("latents", latents)
+        else:
+            latents = torch.load(self.config.latent_file)
+        self.register_parameter("latents", nn.Parameter(latents))
 
     @override
     def train(self, mode: bool = True) -> Self:
@@ -82,29 +78,31 @@ class LDMMixin(SDF):
     def ldm_parameters(self) -> Iterator[nn.Parameter]:
         yield from self.ldm.parameters()
 
-    def mcmc_parameters(self) -> Iterator[nn.Parameter]:
-        if self.config.mcmc_space is MCMCSpace.LATENT:
-            yield self.latents
-        else:
-            yield from (
-                parameter
-                for name, parameter in self.named_parameters()
-                if name.startswith(("encoding", "glin"))
-            )
+    def field_parameters(self) -> Iterator[nn.Parameter]:
+        yield from (
+            parameter
+            for name, parameter in self.named_parameters()
+            if name.startswith(("encoding", "glin"))
+        )
+
+    def latent_parameters(self) -> Iterator[nn.Parameter]:
+        yield self.latents
 
     def nuisance_parameters(self) -> Iterator[nn.Parameter]:
         ldm_parameter_ids = set(map(id, self.ldm_parameters()))
-        mcmc_parameter_ids = set(map(id, self.mcmc_parameters()))
+        field_parameter_ids = set(map(id, self.field_parameters()))
+        latent_parameter_ids = set(map(id, self.latent_parameters()))
         yield from (
             parameter
             for parameter in self.parameters()
-            if id(parameter) not in {*ldm_parameter_ids, *mcmc_parameter_ids}
+            if id(parameter)
+            not in {*ldm_parameter_ids, *field_parameter_ids, *latent_parameter_ids}
         )
 
-    def _fit_ldm_transform_to_mesh(self, mesh: trimesh.Trimesh) -> None:
+    def _fit_transform_to_mesh(self, mesh: trimesh.Trimesh) -> None:
         raise NotImplementedError
 
-    def _fit_ldm_transform_to_sdf(self, sdf: SDFType) -> None:
+    def _fit_transform_to_sdf(self, sdf: SDFType) -> None:
         raise NotImplementedError
 
     @torch.no_grad()
@@ -112,7 +110,6 @@ class LDMMixin(SDF):
         if self.config.mcmc_space is MCMCSpace.LATENT:
             return self.latents
         elif self.config.mcmc_space is MCMCSpace.FIELD:
-            # TODO: slow?
             mesh = generate_mesh_with_multires_marching_cubes(
                 geometry_callable_field=lambda positions: self.sdf(positions).squeeze(-1),
                 resolution=self.config.sdf_resolution,
@@ -122,7 +119,7 @@ class LDMMixin(SDF):
             if mesh.is_empty:
                 return self.latents
             if self.config.fit_transform:
-                self._fit_ldm_transform_to_mesh(mesh)
+                self._fit_transform_to_mesh(mesh)
             mesh = self.transform.inverse()(mesh)
             latents = self.ldm.encode(mesh)
         return latents
@@ -132,7 +129,7 @@ class LDMMixin(SDF):
         latents = self.latents if latents is None else latents
         sdf = self.ldm.decode(latents)
         if self.config.fit_transform:
-            self._fit_ldm_transform_to_sdf(sdf)
+            self._fit_transform_to_sdf(sdf)
         sdf = self.transform(sdf)
         return sdf
 
