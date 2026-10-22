@@ -37,9 +37,9 @@ class MAPMixinConfig(SurfaceModelConfig):
     max_noise_level_anneal: float = 10.0
     min_noise_level_anneal: float = 0.1
     min_noise_level_pfode: float = 0.001
-    effective_sample_size_field: float = 1.0
-    effective_sample_size_latent: float = 1.0
-    coupling_scale_mult: float = 1.0
+    field_prior_scale_mult: float = 1.0
+    field_prior_loss_mult: float = 1.0
+    latent_prior_loss_mult: float = 1.0
     sdf_resolution: int = 64
     sdf_chunk_size: int = 1 << 18
     latent_init_source: LatentInitSource = LatentInitSource.FIELD
@@ -49,7 +49,7 @@ class MAPMixin(SurfaceModel):
     config: MAPMixinConfig
     field: LDMMixin
     noise_levels: torch.Tensor
-    coupling_distributions: torch.distributions.Distribution
+    field_prior_distributions: torch.distributions.Distribution
 
     @override
     def populate_modules(self) -> None:
@@ -99,18 +99,16 @@ class MAPMixin(SurfaceModel):
         return sdf_values
 
     @jaxtyped()
-    def _get_coupling_distribution(
+    def _get_field_prior_distribution(
         self,
         latents: jt.Float[torch.Tensor, " L C "],
         noise_level: jt.Float[torch.Tensor, " "],
     ) -> torch.distributions.Distribution:
         sdf = self.field.decode(latents)
         sdf_grid = self._discretize_sdf(sdf)
-        coupling_distributions = torch.distributions.Normal(
-            loc=sdf_grid,
-            scale=noise_level * self.config.coupling_scale_mult,
-        )
-        return coupling_distributions
+        field_prior_scale = noise_level * self.config.field_prior_scale_mult
+        field_prior_distributions = torch.distributions.Normal(sdf_grid, field_prior_scale)
+        return field_prior_distributions
 
     @torch.no_grad()
     def _on_latent_phase_start(self, noise_level: jt.Float[torch.Tensor, " "]) -> None:
@@ -120,15 +118,12 @@ class MAPMixin(SurfaceModel):
             noisy_latents=self.field.latents,
             noise_level=noise_level,
         )
-        self.latent_prior_distributions = torch.distributions.Normal(
-            loc=denoised_latents,
-            scale=noise_level,
-        )
+        self.latent_prior_distributions = torch.distributions.Normal(denoised_latents, noise_level)
         self.optimization_phase = OptimizationPhase.LATENT
 
     @torch.no_grad()
     def _on_field_phase_start(self, noise_level: jt.Float[torch.Tensor, " "]) -> None:
-        self.coupling_distributions = self._get_coupling_distribution(
+        self.field_prior_distributions = self._get_field_prior_distribution(
             latents=self.field.latents,
             noise_level=noise_level,
         )
@@ -206,27 +201,21 @@ class MAPMixin(SurfaceModel):
     def _latent_prior_loss(self) -> jt.Float[torch.Tensor, " "]:
         latent_prior_losses = -self.latent_prior_distributions.log_prob(self.field.latents)
         latent_prior_loss = torch.mean(latent_prior_losses)
-        latent_prior_loss = latent_prior_loss * self.config.effective_sample_size_latent
         return latent_prior_loss
 
     @jaxtyped()
-    def _latent_coupling_loss(self) -> jt.Float[torch.Tensor, " "]:
-        coupling_distributions = self._get_coupling_distribution(
-            latents=self.field.latents,
-            noise_level=self.noise_level,
-        )
-        coupling_losses = -coupling_distributions.log_prob(self.sdf_grid)
-        coupling_loss = torch.mean(coupling_losses)
-        coupling_loss = coupling_loss * self.config.effective_sample_size_field
-        return coupling_loss
-
-    @jaxtyped()
-    def _field_coupling_loss(self) -> jt.Float[torch.Tensor, " "]:
-        sdf_grid = self._discretize_sdf(self.field.sdf)
-        field_coupling_losses = -self.coupling_distributions.log_prob(sdf_grid)
-        field_coupling_loss = torch.mean(field_coupling_losses)
-        field_coupling_loss = field_coupling_loss * self.config.effective_sample_size_field
-        return field_coupling_loss
+    def _field_prior_loss(self) -> jt.Float[torch.Tensor, " "]:
+        if self.optimization_phase is OptimizationPhase.LATENT:
+            field_prior_distributions = self._get_field_prior_distribution(
+                latents=self.field.latents,
+                noise_level=self.noise_level,
+            )
+            field_prior_losses = -field_prior_distributions.log_prob(self.sdf_grid)
+        elif self.optimization_phase is OptimizationPhase.FIELD:
+            sdf_grid = self._discretize_sdf(self.field.sdf)
+            field_prior_losses = -self.field_prior_distributions.log_prob(sdf_grid)
+        field_prior_loss = torch.mean(field_prior_losses)
+        return field_prior_loss
 
     @override
     def get_loss_dict(
@@ -235,15 +224,13 @@ class MAPMixin(SurfaceModel):
         inputs: dict[str, Any],
         metrics: dict[str, torch.Tensor] | None = None,
     ) -> dict[str, torch.Tensor]:
+        field_prior_loss = self._field_prior_loss()
+        field_prior_loss = field_prior_loss * self.config.field_prior_loss_mult
+        losses = dict(field_prior_loss=field_prior_loss)
         if self.optimization_phase is OptimizationPhase.LATENT:
-            latent_coupling_loss = self._latent_coupling_loss()
             latent_prior_loss = self._latent_prior_loss()
-            losses = dict(
-                latent_coupling_loss=latent_coupling_loss,
-                latent_prior_loss=latent_prior_loss,
-            )
+            latent_prior_loss = latent_prior_loss * self.config.latent_prior_loss_mult
+            losses.update(latent_prior_loss=latent_prior_loss)
         elif self.optimization_phase is OptimizationPhase.FIELD:
-            losses = super().get_loss_dict(outputs, inputs, metrics)
-            field_coupling_loss = self._field_coupling_loss()
-            losses.update(field_coupling_loss=field_coupling_loss)
+            losses.update(super().get_loss_dict(outputs, inputs, metrics))
         return losses

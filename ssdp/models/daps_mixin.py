@@ -25,9 +25,8 @@ class DAPSMixinConfig(SurfaceModelConfig):
     max_noise_level_anneal: float = 10.0
     min_noise_level_anneal: float = 0.1
     min_noise_level_pfode: float = 0.001
-    effective_sample_size_field: float = 1.0
-    effective_sample_size_latent: float = 1.0
-    coupling_scale_mult: float = 1.0
+    field_prior_scale_mult: float = 1.0
+    field_prior_loss_mult: float = 1.0
     sdf_resolution: int = 64
     sdf_chunk_size: int = 1 << 18
 
@@ -36,7 +35,7 @@ class DAPSMixin(SurfaceModel):
     config: DAPSMixinConfig
     field: LDMMixin
     noise_levels: torch.Tensor
-    coupling_distributions: torch.distributions.Distribution
+    field_prior_distributions: torch.distributions.Distribution
 
     @override
     def populate_modules(self) -> None:
@@ -94,25 +93,20 @@ class DAPSMixin(SurfaceModel):
         return sdf_values
 
     @jaxtyped()
-    def _get_coupling_distribution(
+    def _get_field_prior_distribution(
         self,
         latents: jt.Float[torch.Tensor, " L C "],
         noise_level: jt.Float[torch.Tensor, " "],
     ) -> torch.distributions.Distribution:
         if self.field.config.mcmc_space is MCMCSpace.LATENT:
-            coupling_distributions = torch.distributions.Normal(
-                loc=latents,
-                scale=noise_level,
-            )
+            field_prior_distributions = torch.distributions.Normal(latents, noise_level)
         elif self.field.config.mcmc_space is MCMCSpace.FIELD:
             sdf = self.field.decode(latents)
             sdf_grid = self._discretize_sdf(sdf)
             sdf_grid = self._redistance_sdf(sdf_grid)
-            coupling_distributions = torch.distributions.Normal(
-                loc=sdf_grid,
-                scale=noise_level * self.config.coupling_scale_mult,
-            )
-        return coupling_distributions
+            field_prior_scale = noise_level * self.config.field_prior_scale_mult
+            field_prior_distributions = torch.distributions.Normal(sdf_grid, field_prior_scale)
+        return field_prior_distributions
 
     @torch.no_grad()
     def _on_mcmc_start(self, noise_level: jt.Float[torch.Tensor, " "]) -> None:
@@ -127,7 +121,7 @@ class DAPSMixin(SurfaceModel):
             num_ode_steps=self.config.num_steps_pfode,
         )
         self.field.latents.copy_(denoised_latents)
-        self.coupling_distributions = self._get_coupling_distribution(
+        self.field_prior_distributions = self._get_field_prior_distribution(
             latents=denoised_latents,
             noise_level=noise_level,
         )
@@ -179,17 +173,14 @@ class DAPSMixin(SurfaceModel):
         return callbacks
 
     @jaxtyped()
-    def _coupling_loss(self) -> jt.Float[torch.Tensor, " "]:
+    def _field_prior_loss(self) -> jt.Float[torch.Tensor, " "]:
         if self.field.config.mcmc_space is MCMCSpace.LATENT:
-            coupling_losses = -self.coupling_distributions.log_prob(self.field.latents)
-            coupling_loss = torch.mean(coupling_losses)
-            coupling_loss = coupling_loss * self.config.effective_sample_size_latent
+            field_prior_losses = -self.field_prior_distributions.log_prob(self.field.latents)
         elif self.field.config.mcmc_space is MCMCSpace.FIELD:
             sdf_grid = self._discretize_sdf(self.field.sdf)
-            coupling_losses = -self.coupling_distributions.log_prob(sdf_grid)
-            coupling_loss = torch.mean(coupling_losses)
-            coupling_loss = coupling_loss * self.config.effective_sample_size_field
-        return coupling_loss
+            field_prior_losses = -self.field_prior_distributions.log_prob(sdf_grid)
+        field_prior_loss = torch.mean(field_prior_losses)
+        return field_prior_loss
 
     @override
     def get_loss_dict(
@@ -199,6 +190,7 @@ class DAPSMixin(SurfaceModel):
         metrics: dict[str, torch.Tensor] | None = None,
     ) -> dict[str, torch.Tensor]:
         losses = super().get_loss_dict(outputs, inputs, metrics)
-        coupling_loss = self._coupling_loss()
-        losses.update(coupling_loss=coupling_loss)
+        field_prior_loss = self._field_prior_loss()
+        field_prior_loss = field_prior_loss * self.config.field_prior_loss_mult
+        losses.update(field_prior_loss=field_prior_loss)
         return losses
