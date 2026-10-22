@@ -312,7 +312,6 @@ class SurfaceModelMixin(SurfaceModel):
                 losses.update(nlml_color_loss=nlml_color_loss)
 
             if self.config.eikonal_loss_mult:
-                losses.pop("eikonal_loss")
                 ray_samples: RaySamples = outputs["ray_samples"]
                 sdf_gradients: torch.Tensor = outputs["field_outputs"][FieldHeadNames.GRADIENT]
                 eikonal_loss = self._eikonal_loss(
