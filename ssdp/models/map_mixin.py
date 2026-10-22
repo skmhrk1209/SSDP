@@ -4,9 +4,9 @@ from collections.abc import Callable
 from typing import Any, override
 
 import jaxtyping as jt
+import skfmm
 import torch
 import torch.nn as nn
-import torch.utils.checkpoint
 
 from nerfstudio.engine.callbacks import (
     TrainingCallback,
@@ -56,6 +56,7 @@ class MAPMixinConfig(SurfaceModelConfig):
     sdf_num_samples: int = 100000
     sdf_resolution: int = 64
     sdf_chunk_size: int = 1 << 18
+    redistance_sdf: bool = True
     latent_init_source: LatentInitSource = LatentInitSource.FIELD
 
 
@@ -88,6 +89,26 @@ class MAPMixin(SurfaceModel):
             nuisance=list(self.field.nuisance_parameters()),
         )
         return param_groups
+
+    @jaxtyped()
+    @torch.no_grad()
+    def _redistance_sdf(
+        self,
+        sdf_grid: jt.Float[torch.Tensor, " D H W 1 "],
+    ) -> jt.Float[torch.Tensor, " D H W 1 "]:
+        sdf_signs = torch.sign(sdf_grid)
+        if torch.any(sdf_signs >= 0.0) and torch.any(sdf_signs <= 0.0):
+            voxel_size = -torch.sub(*self.field.aabb) / self.config.sdf_resolution
+            voxel_size = voxel_size.flip(-1)
+            sdf_grid = sdf_grid.squeeze(-1)
+            sdf_grid = skfmm.distance(
+                phi=sdf_grid.double().cpu().numpy(),
+                dx=voxel_size.double().cpu().numpy(),
+                order=2,
+            )
+            sdf_grid = voxel_size.new_tensor(sdf_grid)
+            sdf_grid = sdf_grid.unsqueeze(-1)
+        return sdf_grid
 
     @jaxtyped()
     def _discretize_sdf(self, sdf: SDFType) -> jt.Float[torch.Tensor, " D H W 1 "]:
@@ -139,6 +160,8 @@ class MAPMixin(SurfaceModel):
             noise_level=noise_level,
         )
         self.sdf_grid = self._discretize_sdf(self.field.sdf)
+        if self.config.redistance_sdf:
+            self.sdf_grid = self._redistance_sdf(self.sdf_grid)
         self.optimization_phase = OptimizationPhase.LATENT
 
     @torch.no_grad()
@@ -146,6 +169,8 @@ class MAPMixin(SurfaceModel):
         self.noise_level = noise_level
         sdf = self.field.decode(self.field.latents)
         self.sdf_grid = self._discretize_sdf(sdf)
+        if self.config.redistance_sdf:
+            self.sdf_grid = self._redistance_sdf(self.sdf_grid)
         self.optimization_phase = OptimizationPhase.FIELD
 
     @override

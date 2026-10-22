@@ -61,7 +61,7 @@ def _create_trainer_config(
             ),
             latent=dict(
                 optimizer=PSGHMCConfig(
-                    lr=1.0e-4,
+                    lr=1.0e-2,
                     temperature=0.0,
                 ),
                 scheduler=None,
