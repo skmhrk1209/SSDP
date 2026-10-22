@@ -14,6 +14,8 @@ from nerfstudio.configs.base_config import InstantiateConfig
 from nerfstudio.data.scene_box import SceneBox
 from ssdp.utils.jaxtyping import jaxtyped
 
+type SDFType = Callable[[jt.Float[torch.Tensor, " *B 3 "]], jt.Float[torch.Tensor, " *B 1 "]]
+
 
 @jaxtyped()
 def edm_noise_levels(
@@ -71,7 +73,7 @@ class LDM(nn.Module, abc.ABC):
     def decode(
         self,
         latents: jt.Float[torch.Tensor, " L C "],
-    ) -> Callable[[jt.Float[torch.Tensor, " *B 3 "]], jt.Float[torch.Tensor, " *B 1 "]]: ...
+    ) -> SDFType: ...
 
     @abc.abstractmethod
     def tweedie(

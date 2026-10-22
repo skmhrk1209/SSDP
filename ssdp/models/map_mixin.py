@@ -1,5 +1,6 @@
 import dataclasses
 import enum
+from collections.abc import Callable
 from typing import Any, override
 
 import jaxtyping as jt
@@ -15,8 +16,9 @@ from nerfstudio.engine.callbacks import (
 from nerfstudio.models.base_surface_model import SurfaceModel, SurfaceModelConfig
 from ssdp.fields.ldm_mixin import LDMMixin
 from ssdp.priors.ldm import edm_noise_levels
-from ssdp.utils.aliases import SDFType
 from ssdp.utils.jaxtyping import jaxtyped
+
+type SDFType = Callable[[jt.Float[torch.Tensor, " *B 3 "]], jt.Float[torch.Tensor, " *B 1 "]]
 
 
 class OptimizationPhase(enum.StrEnum):
@@ -29,6 +31,17 @@ class LatentInitSource(enum.StrEnum):
     PFODE = enum.auto()
 
 
+def _chunked(sdf: SDFType, chunk_size: int) -> SDFType:
+    @jaxtyped()
+    def wrapper(positions: jt.Float[torch.Tensor, " *B 3 "]) -> jt.Float[torch.Tensor, " *B 1 "]:
+        chunks = positions.flatten(0, -2).split(chunk_size, dim=0)
+        sdf_values = torch.cat(list(map(sdf, chunks)), dim=0)
+        sdf_values = sdf_values.reshape(*positions.shape[:-1], 1)
+        return sdf_values
+
+    return wrapper
+
+
 @dataclasses.dataclass
 class MAPMixinConfig(SurfaceModelConfig):
     num_steps_anneal: int = 100
@@ -37,9 +50,10 @@ class MAPMixinConfig(SurfaceModelConfig):
     max_noise_level_anneal: float = 10.0
     min_noise_level_anneal: float = 0.1
     min_noise_level_pfode: float = 0.001
-    field_prior_scale_mult: float = 1.0
+    field_prior_scale_mult: float = 1.0e-4
     field_prior_loss_mult: float = 1.0
     latent_prior_loss_mult: float = 1.0
+    sdf_num_samples: int = 100000
     sdf_resolution: int = 64
     sdf_chunk_size: int = 1 << 18
     latent_init_source: LatentInitSource = LatentInitSource.FIELD
@@ -49,7 +63,6 @@ class MAPMixin(SurfaceModel):
     config: MAPMixinConfig
     field: LDMMixin
     noise_levels: torch.Tensor
-    field_prior_distributions: torch.distributions.Distribution
 
     @override
     def populate_modules(self) -> None:
@@ -77,56 +90,62 @@ class MAPMixin(SurfaceModel):
         return param_groups
 
     @jaxtyped()
-    def _discretize_sdf(self, sdf: SDFType) -> jt.Float[torch.Tensor, " D H W "]:
-        positions = (
+    def _discretize_sdf(self, sdf: SDFType) -> jt.Float[torch.Tensor, " D H W 1 "]:
+        positions = [
             torch.linspace(*range, self.config.sdf_resolution + 1, device=self.device)[..., :-1]
+            - torch.sub(*range) / self.config.sdf_resolution / 2.0
             for range in self.field.aabb.T
-        )
-        positions = torch.stack(torch.meshgrid(*positions, indexing="ij"), dim=-1)
-        chunks = positions.flatten(0, -2).split(self.config.sdf_chunk_size)
-        if torch.is_grad_enabled():
-            # NOTE: the decoder's graph is recomputed chunk by chunk in the backward pass (memory)
-            sdf_values = torch.cat(
-                [
-                    torch.utils.checkpoint.checkpoint(sdf, chunk, use_reentrant=False)
-                    for chunk in chunks
-                ],
-                dim=0,
-            )
-        else:
-            sdf_values = torch.cat(list(map(sdf, chunks)), dim=0)
-        sdf_values = sdf_values.reshape(positions.shape[:-1])
-        return sdf_values
+        ]
+        positions = torch.meshgrid(*reversed(positions), indexing="ij")
+        positions = torch.stack(list(reversed(positions)), dim=-1)
+        sdf_grid = _chunked(sdf, self.config.sdf_chunk_size)(positions)
+        return sdf_grid
 
     @jaxtyped()
-    def _get_field_prior_distribution(
+    def _sample_sdf(
         self,
-        latents: jt.Float[torch.Tensor, " L C "],
-        noise_level: jt.Float[torch.Tensor, " "],
-    ) -> torch.distributions.Distribution:
-        sdf = self.field.decode(latents)
-        sdf_grid = self._discretize_sdf(sdf)
-        field_prior_scale = noise_level * self.config.field_prior_scale_mult
-        field_prior_distributions = torch.distributions.Normal(sdf_grid, field_prior_scale)
-        return field_prior_distributions
+        sdf: SDFType,
+    ) -> tuple[jt.Float[torch.Tensor, " *B 1 "], jt.Float[torch.Tensor, " *B 3 "]]:
+        positions = torch.rand(self.config.sdf_num_samples, 3, device=self.device)
+        positions = torch.lerp(*self.field.aabb, positions)
+        sdf_values = _chunked(sdf, self.config.sdf_chunk_size)(positions)
+        return sdf_values, positions
+
+    @jaxtyped()
+    def _interpolate_sdf(
+        self,
+        sdf_grid: jt.Float[torch.Tensor, " D H W 1 "],
+        positions: jt.Float[torch.Tensor, " *B 3 "],
+    ) -> jt.Float[torch.Tensor, " *B 1 "]:
+        aabb_min, aabb_max = self.field.aabb
+        voxel_size = (aabb_max - aabb_min) / self.config.sdf_resolution
+        positions = (positions - aabb_min - voxel_size / 2.0) / (aabb_max - aabb_min - voxel_size)
+        positions = positions * 2.0 - 1.0
+        sdf_values = nn.functional.grid_sample(
+            input=sdf_grid.movedim(-1, 0).unsqueeze(0),
+            grid=positions.reshape(1, 1, 1, -1, 3),
+            mode="bilinear",
+            padding_mode="border",
+            align_corners=True,
+        )
+        sdf_values = sdf_values.reshape(*positions.shape[:-1], 1)
+        return sdf_values
 
     @torch.no_grad()
     def _on_latent_phase_start(self, noise_level: jt.Float[torch.Tensor, " "]) -> None:
         self.noise_level = noise_level
-        self.sdf_grid = self._discretize_sdf(self.field.sdf)
-        denoised_latents = self.field.ldm.tweedie(
+        self.denoised_latents = self.field.ldm.tweedie(
             noisy_latents=self.field.latents,
             noise_level=noise_level,
         )
-        self.latent_prior_distributions = torch.distributions.Normal(denoised_latents, noise_level)
+        self.sdf_grid = self._discretize_sdf(self.field.sdf)
         self.optimization_phase = OptimizationPhase.LATENT
 
     @torch.no_grad()
     def _on_field_phase_start(self, noise_level: jt.Float[torch.Tensor, " "]) -> None:
-        self.field_prior_distributions = self._get_field_prior_distribution(
-            latents=self.field.latents,
-            noise_level=noise_level,
-        )
+        self.noise_level = noise_level
+        sdf = self.field.decode(self.field.latents)
+        self.sdf_grid = self._discretize_sdf(sdf)
         self.optimization_phase = OptimizationPhase.FIELD
 
     @override
@@ -199,21 +218,28 @@ class MAPMixin(SurfaceModel):
 
     @jaxtyped()
     def _latent_prior_loss(self) -> jt.Float[torch.Tensor, " "]:
-        latent_prior_losses = -self.latent_prior_distributions.log_prob(self.field.latents)
+        latent_prior_distributions = torch.distributions.Normal(
+            loc=self.denoised_latents,
+            scale=self.noise_level,
+        )
+        latent_prior_losses = -latent_prior_distributions.log_prob(self.field.latents)
         latent_prior_loss = torch.mean(latent_prior_losses)
         return latent_prior_loss
 
     @jaxtyped()
     def _field_prior_loss(self) -> jt.Float[torch.Tensor, " "]:
         if self.optimization_phase is OptimizationPhase.LATENT:
-            field_prior_distributions = self._get_field_prior_distribution(
-                latents=self.field.latents,
-                noise_level=self.noise_level,
-            )
-            field_prior_losses = -field_prior_distributions.log_prob(self.sdf_grid)
+            sdf = self.field.decode(self.field.latents)
+            latent_sdf_values, positions = self._sample_sdf(sdf)
+            field_sdf_values = self._interpolate_sdf(self.sdf_grid, positions)
         elif self.optimization_phase is OptimizationPhase.FIELD:
-            sdf_grid = self._discretize_sdf(self.field.sdf)
-            field_prior_losses = -self.field_prior_distributions.log_prob(sdf_grid)
+            field_sdf_values, positions = self._sample_sdf(self.field.sdf)
+            latent_sdf_values = self._interpolate_sdf(self.sdf_grid, positions)
+        field_prior_distributions = torch.distributions.Normal(
+            loc=latent_sdf_values,
+            scale=self.noise_level * self.config.field_prior_scale_mult,
+        )
+        field_prior_losses = -field_prior_distributions.log_prob(field_sdf_values)
         field_prior_loss = torch.mean(field_prior_losses)
         return field_prior_loss
 

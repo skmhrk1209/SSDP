@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from typing import Any, Self
 
 import jaxtyping as jt
@@ -6,8 +7,9 @@ import torch.nn as nn
 import trimesh
 from scipy.spatial.transform import RigidTransform, Rotation
 
-from .aliases import SDFType
 from .jaxtyping import jaxtyped
+
+type SDFType = Callable[[jt.Float[torch.Tensor, " *B 3 "]], jt.Float[torch.Tensor, " *B 1 "]]
 
 
 class SimilarityTransform(nn.Module):

@@ -40,7 +40,6 @@ def _create_trainer_config(
             near_plane=0.0,
             far_plane=5.0,
             background_model="mlp",
-            eikonal_loss_mult=0.0,
             nll_color_loss_mult=1.0,
             nlml_color_loss_mult=0.0,
             anneal_end_step=source_trainer_config.max_num_iterations // 2,

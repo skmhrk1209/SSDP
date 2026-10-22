@@ -2,7 +2,7 @@ import dataclasses
 import enum
 import json
 import operator
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any, Self, override
 
@@ -14,11 +14,12 @@ import trimesh
 from nerfstudio.exporter.marching_cubes import generate_mesh_with_multires_marching_cubes
 from ssdp.priors.ldm import LDM, LDMConfig
 from ssdp.priors.triposg import TripoSGPriorConfig
-from ssdp.utils.aliases import SDFType
 from ssdp.utils.geometry import SimilarityTransform
 from ssdp.utils.jaxtyping import jaxtyped
 
 from .sdf import SDF, SDFConfig
+
+type SDFType = Callable[[jt.Float[torch.Tensor, " *B 3 "]], jt.Float[torch.Tensor, " *B 1 "]]
 
 
 class MCMCSpace(enum.StrEnum):

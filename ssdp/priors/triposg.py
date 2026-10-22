@@ -31,6 +31,8 @@ from .ldm import LDM, LDMConfig
 # and install torch-cluster. and run:
 autoencoder_kl_triposg.fps = fps
 
+type SDFType = Callable[[jt.Float[torch.Tensor, " *B 3 "]], jt.Float[torch.Tensor, " *B 1 "]]
+
 
 class EncoderOutputMode(enum.StrEnum):
     MEAN = enum.auto()
@@ -158,7 +160,7 @@ class TripoSGPrior(LDM):
     def decode(
         self,
         latents: jt.Float[torch.Tensor, " L C "],
-    ) -> Callable[[jt.Float[torch.Tensor, " *B 3 "]], jt.Float[torch.Tensor, " *B 1 "]]:
+    ) -> SDFType:
         latents = latents.unsqueeze(0)
         latents = self.auto_encoder.post_quant(latents)
         queries = self.auto_encoder.embedder(latents.new_zeros(1, 1, 3))
