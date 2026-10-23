@@ -16,6 +16,7 @@ from scripts.image_process import prepare_image
 from torch.nn.attention import SDPBackend, sdpa_kernel
 from torch_cluster import fps
 from transformers import BitImageProcessor, Dinov2Model
+from trimesh.intersections import slice_mesh_plane
 from triposg.models.autoencoders import TripoSGVAEModel, autoencoder_kl_triposg
 from triposg.models.autoencoders.vae import DiagonalGaussianDistribution
 from triposg.models.transformers import TripoSGDiTModel
@@ -124,6 +125,14 @@ class TripoSGPrior(LDM):
         self.image_embeddings = image_embeddings
         self.already_conditioned = False
 
+    def _slice_mesh(self, mesh: trimesh.Trimesh) -> trimesh.Trimesh:
+        for dim, origins in enumerate(self.aabb.T.tolist()):
+            for sign, origin in zip((1, -1), origins, strict=True):
+                origin = np.roll((origin, 0.0, 0.0), dim)
+                normal = np.roll((sign, 0.0, 0.0), dim)
+                mesh = slice_mesh_plane(mesh, normal, origin)
+        return mesh
+
     @jaxtyped()
     @torch.no_grad()
     def encode(
@@ -131,6 +140,7 @@ class TripoSGPrior(LDM):
         mesh: trimesh.Trimesh,
         seed: int | None = None,
     ) -> jt.Float[torch.Tensor, " L C "]:
+        mesh = self._slice_mesh(mesh)
         positions, face_indices = trimesh.sample.sample_surface(
             mesh=mesh,
             count=self.config.num_surface_points,
@@ -172,15 +182,9 @@ class TripoSGPrior(LDM):
         @jaxtyped()
         def sdf(
             positions: jt.Float[torch.Tensor, " *B 3 "],
-            sdf_scale: float = self.config.distance_per_unit,
         ) -> jt.Float[torch.Tensor, " *B 1 "]:
-            clamped_positions = torch.clamp(positions, *self.aabb)
-            sdf_shifts = torch.linalg.vector_norm(
-                x=positions - clamped_positions,
-                dim=-1,
-                keepdim=True,
-            )
-            queries = self.auto_encoder.embedder(clamped_positions)
+            positions = torch.clamp(positions, *self.aabb)
+            queries = self.auto_encoder.embedder(positions)
             needs_second_derivative = torch.is_grad_enabled() and positions.requires_grad
             attention_kernel = (
                 sdpa_kernel(SDPBackend.MATH)
@@ -189,9 +193,9 @@ class TripoSGPrior(LDM):
             )
             with attention_kernel:
                 queries = queries.flatten(0, -2).unsqueeze(0)
-                tsdf_values, _ = self.auto_encoder.decoder(None, queries, kv_cache)
-                tsdf_values = tsdf_values.squeeze(0).unflatten(0, positions.shape[:-1])
-            sdf_values = tsdf_values * sdf_scale + sdf_shifts
+                sdf_values, _ = self.auto_encoder.decoder(None, queries, kv_cache)
+                sdf_values = sdf_values.squeeze(0).unflatten(0, positions.shape[:-1])
+            sdf_values = sdf_values * self.config.distance_per_unit
             return sdf_values
 
         return sdf

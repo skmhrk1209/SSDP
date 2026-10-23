@@ -172,6 +172,7 @@ class MAPMixin(DAPSMixin):
                 sdf_grid = self._discretize_sdf(sdf)
                 sdf_grid = self._diff_redistance_sdf(sdf_grid)
                 sdf = functools.partial(self._interpolate_sdf, sdf_grid)
+                sdf = self.field.transform(sdf)
             latent_sdf_values, positions = self._sample_sdf(sdf)
             field_sdf_values = self._interpolate_sdf(self.sdf_grid, positions)
         elif self.optimization_phase is OptimizationPhase.FIELD:

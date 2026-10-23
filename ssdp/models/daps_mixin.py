@@ -75,14 +75,14 @@ class DAPSMixin(SurfaceModel):
 
     @jaxtyped()
     def _get_voxel_sizes(self) -> jt.Float[torch.Tensor, " 3 "]:
-        voxel_sizes = -torch.sub(*self.field.aabb) / self.config.sdf_resolution
+        voxel_sizes = -torch.sub(*self.field.ldm.aabb) / self.config.sdf_resolution
         return voxel_sizes
 
     @jaxtyped()
     def _get_voxel_grid(self) -> jt.Float[torch.Tensor, " D H W 3 "]:
         voxel_sizes = self._get_voxel_sizes()
         voxel_coords = torch.linspace(0.0, 1.0, self.config.sdf_resolution + 1)
-        voxel_coords = torch.lerp(*self.field.aabb, voxel_coords.unsqueeze(-1))
+        voxel_coords = torch.lerp(*self.field.ldm.aabb, voxel_coords.unsqueeze(-1))
         voxel_coords = voxel_coords[:-1, ...] + voxel_sizes / 2.0
         voxel_grid = torch.meshgrid(*reversed(voxel_coords.T), indexing="ij")
         voxel_grid = torch.stack(list(reversed(voxel_grid)), dim=-1)
@@ -102,6 +102,7 @@ class DAPSMixin(SurfaceModel):
 
     @jaxtyped()
     def _discretize_sdf(self, sdf: SDFType) -> jt.Float[torch.Tensor, " D H W 1 "]:
+        sdf = self.field.transform.inverse()(sdf)
         sdf_grid = self._chunked_sdf(sdf)(self.voxel_grid)
         return sdf_grid
 
@@ -111,7 +112,7 @@ class DAPSMixin(SurfaceModel):
         num_positions: int,
     ) -> jt.Float[torch.Tensor, " {num_positions} 3 "]:
         positions = torch.rand(num_positions, 3, device=self.device)
-        positions = torch.lerp(*self.field.aabb, positions)
+        positions = torch.lerp(*self.field.ldm.aabb, positions)
         return positions
 
     @jaxtyped()
@@ -120,6 +121,7 @@ class DAPSMixin(SurfaceModel):
         sdf: SDFType,
     ) -> tuple[jt.Float[torch.Tensor, " *B 1 "], jt.Float[torch.Tensor, " *B 3 "]]:
         positions = self._get_random_positions(self.config.sdf_num_samples)
+        sdf = self.field.transform.inverse()(sdf)
         sdf_values = self._chunked_sdf(sdf)(positions)
         return sdf_values, positions
 
@@ -129,7 +131,7 @@ class DAPSMixin(SurfaceModel):
         positions: jt.Float[torch.Tensor, " *B 3 "],
     ) -> jt.Float[torch.Tensor, " *B 3 "]:
         voxel_sizes = self._get_voxel_sizes()
-        aabb_min, aabb_max = self.field.aabb
+        aabb_min, aabb_max = self.field.ldm.aabb
         grid_min = aabb_min + voxel_sizes / 2.0
         grid_max = aabb_max - voxel_sizes / 2.0
         positions = (positions - grid_min) / (grid_max - grid_min)
@@ -141,7 +143,7 @@ class DAPSMixin(SurfaceModel):
         positions: jt.Float[torch.Tensor, " *B 3 "],
     ) -> jt.Float[torch.Tensor, " *B 3 "]:
         voxel_sizes = self._get_voxel_sizes()
-        aabb_min, aabb_max = self.field.aabb
+        aabb_min, aabb_max = self.field.ldm.aabb
         grid_min = aabb_min + voxel_sizes / 2.0
         grid_max = aabb_max - voxel_sizes / 2.0
         positions = positions * (grid_max - grid_min) + grid_min

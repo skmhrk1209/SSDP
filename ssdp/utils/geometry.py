@@ -47,6 +47,15 @@ class SimilarityTransform(nn.Module):
             translation=-self.rotation.T @ self.translation / self.scale,
         )
 
+    def _transform_mesh(self, mesh: trimesh.Trimesh) -> trimesh.Trimesh:
+        rigid_transform = RigidTransform.from_components(
+            rotation=Rotation.from_matrix(self.rotation.cpu().numpy()),
+            translation=self.translation.cpu().numpy(),
+        ).as_matrix()
+        mesh = mesh.apply_scale(self.scale.item())
+        mesh = mesh.apply_transform(rigid_transform)
+        return mesh
+
     def _transform_sdf(self, sdf: SDFType) -> SDFType:
         @jaxtyped()
         def transformed_sdf(
@@ -57,15 +66,6 @@ class SimilarityTransform(nn.Module):
             return sdf_values
 
         return transformed_sdf
-
-    def _transform_mesh(self, mesh: trimesh.Trimesh) -> trimesh.Trimesh:
-        rigid_transform = RigidTransform.from_components(
-            rotation=Rotation.from_matrix(self.rotation.cpu().numpy()),
-            translation=self.translation.cpu().numpy(),
-        ).as_matrix()
-        mesh = mesh.apply_scale(self.scale.item())
-        mesh = mesh.apply_transform(rigid_transform)
-        return mesh
 
     def forward(
         self,
