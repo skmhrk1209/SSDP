@@ -31,7 +31,10 @@ from .ldm import LDM, LDMConfig
 # and install torch-cluster. and run:
 autoencoder_kl_triposg.fps = fps
 
-type SDFType = Callable[[jt.Float[torch.Tensor, " *B 3 "]], jt.Float[torch.Tensor, " *B 1 "]]
+type SDFType = Callable[
+    [jt.Float[torch.Tensor, " *B 3 "]],
+    jt.Float[torch.Tensor, " *B 1 "],
+]
 
 
 class EncoderOutputMode(enum.StrEnum):

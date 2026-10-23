@@ -9,7 +9,10 @@ from scipy.spatial.transform import RigidTransform, Rotation
 
 from .jaxtyping import jaxtyped
 
-type SDFType = Callable[[jt.Float[torch.Tensor, " *B 3 "]], jt.Float[torch.Tensor, " *B 1 "]]
+type SDFType = Callable[
+    [jt.Float[torch.Tensor, " *B 3 "]],
+    jt.Float[torch.Tensor, " *B 1 "],
+]
 
 
 class SimilarityTransform(nn.Module):

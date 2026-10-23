@@ -14,7 +14,10 @@ from nerfstudio.configs.base_config import InstantiateConfig
 from nerfstudio.data.scene_box import SceneBox
 from ssdp.utils.jaxtyping import jaxtyped
 
-type SDFType = Callable[[jt.Float[torch.Tensor, " *B 3 "]], jt.Float[torch.Tensor, " *B 1 "]]
+type SDFType = Callable[
+    [jt.Float[torch.Tensor, " *B 3 "]],
+    jt.Float[torch.Tensor, " *B 1 "],
+]
 
 
 @jaxtyped()

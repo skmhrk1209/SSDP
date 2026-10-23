@@ -19,7 +19,10 @@ from ssdp.utils.jaxtyping import jaxtyped
 
 from .sdf import SDF, SDFConfig
 
-type SDFType = Callable[[jt.Float[torch.Tensor, " *B 3 "]], jt.Float[torch.Tensor, " *B 1 "]]
+type SDFType = Callable[
+    [jt.Float[torch.Tensor, " *B 3 "]],
+    jt.Float[torch.Tensor, " *B 1 "],
+]
 
 
 class MCMCSpace(enum.StrEnum):

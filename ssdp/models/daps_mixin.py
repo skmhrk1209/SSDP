@@ -17,18 +17,10 @@ from ssdp.fields.ldm_mixin import LDMMixin, MCMCSpace
 from ssdp.priors.ldm import edm_noise_levels
 from ssdp.utils.jaxtyping import jaxtyped
 
-type SDFType = Callable[[jt.Float[torch.Tensor, " *B 3 "]], jt.Float[torch.Tensor, " *B 1 "]]
-
-
-def _chunked(sdf: SDFType, chunk_size: int) -> SDFType:
-    @jaxtyped()
-    def wrapper(positions: jt.Float[torch.Tensor, " *B 3 "]) -> jt.Float[torch.Tensor, " *B 1 "]:
-        chunks = positions.flatten(0, -2).split(chunk_size, dim=0)
-        sdf_values = torch.cat(list(map(sdf, chunks)), dim=0)
-        sdf_values = sdf_values.reshape(*positions.shape[:-1], 1)
-        return sdf_values
-
-    return wrapper
+type SDFType = Callable[
+    [jt.Float[torch.Tensor, " *B 3 "]],
+    jt.Float[torch.Tensor, " *B 1 "],
+]
 
 
 @dataclasses.dataclass
@@ -49,19 +41,24 @@ class DAPSMixinConfig(SurfaceModelConfig):
 class DAPSMixin(SurfaceModel):
     config: DAPSMixinConfig
     field: LDMMixin
+    voxel_grid: torch.Tensor
     noise_levels: torch.Tensor
 
     @override
     def populate_modules(self) -> None:
         super().populate_modules()
-        noise_levels = edm_noise_levels(
-            max_noise_level=torch.as_tensor(self.config.max_noise_level_anneal),
-            min_noise_level=torch.as_tensor(self.config.min_noise_level_anneal),
-            num_ode_steps=self.config.num_steps_anneal,
+        self.register_buffer(
+            name="voxel_grid",
+            tensor=self._get_voxel_grid(),
+            persistent=False,
         )
         self.register_buffer(
             name="noise_levels",
-            tensor=noise_levels,
+            tensor=edm_noise_levels(
+                max_noise_level=torch.as_tensor(self.config.max_noise_level_anneal),
+                min_noise_level=torch.as_tensor(self.config.min_noise_level_anneal),
+                num_ode_steps=self.config.num_steps_anneal,
+            ),
             persistent=False,
         )
 
@@ -77,46 +74,78 @@ class DAPSMixin(SurfaceModel):
         return param_groups
 
     @jaxtyped()
-    @torch.no_grad()
-    def _redistance_sdf(
-        self,
-        sdf_grid: jt.Float[torch.Tensor, " D H W 1 "],
-    ) -> jt.Float[torch.Tensor, " D H W 1 "]:
-        sdf_signs = torch.sign(sdf_grid)
-        if torch.any(sdf_signs >= 0.0) and torch.any(sdf_signs <= 0.0):
-            voxel_size = -torch.sub(*self.field.aabb) / self.config.sdf_resolution
-            voxel_size = voxel_size.flip(-1)
-            sdf_grid = sdf_grid.squeeze(-1)
-            sdf_grid = skfmm.distance(
-                phi=sdf_grid.double().cpu().numpy(),
-                dx=voxel_size.double().cpu().numpy(),
-                order=2,
-            )
-            sdf_grid = voxel_size.new_tensor(sdf_grid)
-            sdf_grid = sdf_grid.unsqueeze(-1)
-        return sdf_grid
+    def _get_voxel_sizes(self) -> jt.Float[torch.Tensor, " 3 "]:
+        voxel_sizes = -torch.sub(*self.field.aabb) / self.config.sdf_resolution
+        return voxel_sizes
+
+    @jaxtyped()
+    def _get_voxel_grid(self) -> jt.Float[torch.Tensor, " D H W 3 "]:
+        voxel_sizes = self._get_voxel_sizes()
+        voxel_coords = torch.linspace(0.0, 1.0, self.config.sdf_resolution + 1)
+        voxel_coords = torch.lerp(*self.field.aabb, voxel_coords.unsqueeze(-1))
+        voxel_coords = voxel_coords[:-1, ...] + voxel_sizes / 2.0
+        voxel_grid = torch.meshgrid(*reversed(voxel_coords.T), indexing="ij")
+        voxel_grid = torch.stack(list(reversed(voxel_grid)), dim=-1)
+        return voxel_grid
+
+    def _chunked_sdf(self, sdf: SDFType) -> SDFType:
+        @jaxtyped()
+        def chunked_sdf(
+            positions: jt.Float[torch.Tensor, " *B 3 "],
+        ) -> jt.Float[torch.Tensor, " *B 1 "]:
+            chunks = positions.flatten(0, -2).split(self.config.sdf_chunk_size, dim=0)
+            sdf_values = torch.cat(list(map(sdf, chunks)), dim=0)
+            sdf_values = sdf_values.reshape(*positions.shape[:-1], 1)
+            return sdf_values
+
+        return chunked_sdf
 
     @jaxtyped()
     def _discretize_sdf(self, sdf: SDFType) -> jt.Float[torch.Tensor, " D H W 1 "]:
-        positions = [
-            torch.linspace(*range, self.config.sdf_resolution + 1, device=self.device)[..., :-1]
-            - torch.sub(*range) / self.config.sdf_resolution / 2.0
-            for range in self.field.aabb.T
-        ]
-        positions = torch.meshgrid(*reversed(positions), indexing="ij")
-        positions = torch.stack(list(reversed(positions)), dim=-1)
-        sdf_grid = _chunked(sdf, self.config.sdf_chunk_size)(positions)
+        sdf_grid = self._chunked_sdf(sdf)(self.voxel_grid)
         return sdf_grid
+
+    @jaxtyped()
+    def _get_random_positions(
+        self,
+        num_positions: int,
+    ) -> jt.Float[torch.Tensor, " {num_positions} 3 "]:
+        positions = torch.rand(num_positions, 3, device=self.device)
+        positions = torch.lerp(*self.field.aabb, positions)
+        return positions
 
     @jaxtyped()
     def _sample_sdf(
         self,
         sdf: SDFType,
     ) -> tuple[jt.Float[torch.Tensor, " *B 1 "], jt.Float[torch.Tensor, " *B 3 "]]:
-        positions = torch.rand(self.config.sdf_num_samples, 3, device=self.device)
-        positions = torch.lerp(*self.field.aabb, positions)
-        sdf_values = _chunked(sdf, self.config.sdf_chunk_size)(positions)
+        positions = self._get_random_positions(self.config.sdf_num_samples)
+        sdf_values = self._chunked_sdf(sdf)(positions)
         return sdf_values, positions
+
+    @jaxtyped()
+    def _normalize_position(
+        self,
+        positions: jt.Float[torch.Tensor, " *B 3 "],
+    ) -> jt.Float[torch.Tensor, " *B 3 "]:
+        voxel_sizes = self._get_voxel_sizes()
+        aabb_min, aabb_max = self.field.aabb
+        grid_min = aabb_min + voxel_sizes / 2.0
+        grid_max = aabb_max - voxel_sizes / 2.0
+        positions = (positions - grid_min) / (grid_max - grid_min)
+        return positions
+
+    @jaxtyped()
+    def _denormalize_position(
+        self,
+        positions: jt.Float[torch.Tensor, " *B 3 "],
+    ) -> jt.Float[torch.Tensor, " *B 3 "]:
+        voxel_sizes = self._get_voxel_sizes()
+        aabb_min, aabb_max = self.field.aabb
+        grid_min = aabb_min + voxel_sizes / 2.0
+        grid_max = aabb_max - voxel_sizes / 2.0
+        positions = positions * (grid_max - grid_min) + grid_min
+        return positions
 
     @jaxtyped()
     def _interpolate_sdf(
@@ -124,9 +153,7 @@ class DAPSMixin(SurfaceModel):
         sdf_grid: jt.Float[torch.Tensor, " D H W 1 "],
         positions: jt.Float[torch.Tensor, " *B 3 "],
     ) -> jt.Float[torch.Tensor, " *B 1 "]:
-        aabb_min, aabb_max = self.field.aabb
-        voxel_size = (aabb_max - aabb_min) / self.config.sdf_resolution
-        positions = (positions - aabb_min - voxel_size / 2.0) / (aabb_max - aabb_min - voxel_size)
+        positions = self._normalize_position(positions)
         positions = positions * 2.0 - 1.0
         sdf_values = nn.functional.grid_sample(
             input=sdf_grid.movedim(-1, 0).unsqueeze(0),
@@ -137,6 +164,34 @@ class DAPSMixin(SurfaceModel):
         )
         sdf_values = sdf_values.reshape(*positions.shape[:-1], 1)
         return sdf_values
+
+    @jaxtyped()
+    def _has_zero_level(
+        self,
+        sdf_values: jt.Float[torch.Tensor, " *B "],
+    ) -> jt.Bool[torch.Tensor, " "]:
+        sdf_signs = torch.sign(sdf_values)
+        return torch.any(sdf_signs >= 0.0) and torch.any(sdf_signs <= 0.0)
+
+    @jaxtyped()
+    @torch.no_grad()
+    def _redistance_sdf(
+        self,
+        sdf_grid: jt.Float[torch.Tensor, " D H W 1 "],
+    ) -> jt.Float[torch.Tensor, " D H W 1 "]:
+        if not self._has_zero_level(sdf_grid):
+            return sdf_grid
+        voxel_sizes = self._get_voxel_sizes()
+        voxel_sizes = voxel_sizes.flip(-1)
+        sdf_grid = sdf_grid.squeeze(-1)
+        sdf_grid = skfmm.distance(
+            phi=sdf_grid.double().cpu().numpy(),
+            dx=voxel_sizes.double().cpu().numpy(),
+            order=2,
+        )
+        sdf_grid = voxel_sizes.new_tensor(sdf_grid)
+        sdf_grid = sdf_grid.unsqueeze(-1)
+        return sdf_grid
 
     @torch.no_grad()
     def _on_mcmc_start(self, noise_level: jt.Float[torch.Tensor, " "]) -> None:
