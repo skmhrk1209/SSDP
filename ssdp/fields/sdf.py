@@ -212,21 +212,30 @@ class SDF(SDFField):
         return sdf_values
 
     @jaxtyped()
-    def finite_diff_grad(
+    def gradient(
         self,
         positions: jt.Float[torch.Tensor, " *B 3 "],
-    ) -> tuple[
-        jt.Float[torch.Tensor, " *B 3 "],
-        jt.Float[torch.Tensor, " 3 *B 1 "],
-        jt.Float[torch.Tensor, " 3 *B 1 "],
-    ]:
-        finite_diff_epsilons = torch.full_like(positions, self.finite_diff_epsilon)
-        finite_diff_epsilons = torch.diag_embed(finite_diff_epsilons, dim1=0, dim2=-1)
-        pos_sdf_values = self.sdf(positions + finite_diff_epsilons)
-        neg_sdf_values = self.sdf(positions - finite_diff_epsilons)
-        sdf_gradients = (pos_sdf_values - neg_sdf_values) / (self.finite_diff_epsilon * 2.0)
-        sdf_gradients = sdf_gradients.squeeze(-1).movedim(0, -1)
-        return sdf_gradients, pos_sdf_values, neg_sdf_values
+        sdf_values: jt.Float[torch.Tensor, " *B 1 "] | None = None,
+    ) -> jt.Float[torch.Tensor, " *B 3 "]:
+        if self.config.enable_finite_diff_grad:
+            finite_diff_epsilons = torch.full_like(positions, self.finite_diff_epsilon)
+            finite_diff_epsilons = torch.diag_embed(finite_diff_epsilons, dim1=0, dim2=-1)
+            pos_sdf_values = self.sdf(positions + finite_diff_epsilons)
+            neg_sdf_values = self.sdf(positions - finite_diff_epsilons)
+            sdf_gradients = (pos_sdf_values - neg_sdf_values) / (self.finite_diff_epsilon * 2.0)
+            sdf_gradients = sdf_gradients.squeeze(-1).movedim(0, -1)
+        else:
+            if sdf_values is None:
+                positions.requires_grad_(True)
+                sdf_values = self.sdf(positions)
+            [sdf_gradients] = torch.autograd.grad(
+                outputs=sdf_values,
+                inputs=positions,
+                grad_outputs=torch.ones_like(sdf_values),
+                create_graph=self.training,
+                retain_graph=self.training,
+            )
+        return sdf_gradients
 
     def update_grid_encoding_mask(self, num_grid_levels: int) -> None:
         num_grid_features = num_grid_levels * self.config.features_per_level
@@ -260,17 +269,7 @@ class SDF(SDFField):
                 dim=-1,
             )
 
-        if self.config.enable_finite_diff_grad:
-            sdf_gradients, pos_sdf_values, neg_sdf_values = self.finite_diff_grad(ray_positions)
-        else:
-            [sdf_gradients] = torch.autograd.grad(
-                outputs=sdf_values,
-                inputs=ray_positions,
-                grad_outputs=torch.ones_like(sdf_values),
-                create_graph=self.training,
-                retain_graph=self.training,
-            )
-
+        sdf_gradients = self.gradient(ray_positions, sdf_values)
         sdf_normals = torch.nn.functional.normalize(sdf_gradients, p=2, dim=-1)
 
         colors = self.forward_color_network(
@@ -289,12 +288,6 @@ class SDF(SDFField):
         }
 
         outputs.update(geo_features=geo_features)
-
-        if self.config.enable_finite_diff_grad:
-            outputs.update(
-                pos_sdf_values=pos_sdf_values,
-                neg_sdf_values=neg_sdf_values,
-            )
 
         if return_alphas:
             alphas = self.get_alpha(ray_samples, sdf_values, sdf_gradients)

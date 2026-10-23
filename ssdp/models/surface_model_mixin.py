@@ -7,7 +7,7 @@ import loguru
 import torch
 import torch.nn as nn
 
-from nerfstudio.cameras.rays import RayBundle, RaySamples
+from nerfstudio.cameras.rays import RayBundle
 from nerfstudio.data.scene_box import SceneBox
 from nerfstudio.engine.callbacks import (
     TrainingCallback,
@@ -41,6 +41,8 @@ class SurfaceModelMixinConfig(SurfaceModelConfig):
     nlml_color_loss_mult: float = 0.0
     color_distribution_type: ColorDistributionType = ColorDistributionType.LAPLACE
     color_distribution_scale: float = 1.0
+    eikonal_resample_points: bool = True
+    eikonal_num_samples: int = 100000
     sphere_tracer: SphereTracerConfig = dataclasses.field(
         default_factory=SphereTracerConfig,
     )
@@ -256,12 +258,8 @@ class SurfaceModelMixin(SurfaceModel):
     @jaxtyped()
     def _eikonal_loss(
         self,
-        ray_samples: RaySamples,
         sdf_gradients: jt.Float[torch.Tensor, " *B 3 "],
     ) -> jt.Float[torch.Tensor, " "]:
-        positions = ray_samples.frustums.get_start_positions()
-        inside_masks = self.scene_box.within(positions)
-        sdf_gradients = sdf_gradients[inside_masks, ...]
         gradient_norms = torch.linalg.vector_norm(sdf_gradients, ord=2, dim=-1)
         eikonal_loss = nn.functional.mse_loss(gradient_norms, torch.ones_like(gradient_norms))
         return eikonal_loss
@@ -309,12 +307,12 @@ class SurfaceModelMixin(SurfaceModel):
                 losses.update(nlml_color_loss=nlml_color_loss)
 
             if self.config.eikonal_loss_mult:
-                ray_samples: RaySamples = outputs["ray_samples"]
                 sdf_gradients: torch.Tensor = outputs["field_outputs"][FieldHeadNames.GRADIENT]
-                eikonal_loss = self._eikonal_loss(
-                    ray_samples=ray_samples,
-                    sdf_gradients=sdf_gradients,
-                )
+                if self.config.eikonal_resample_points:
+                    positions = torch.rand(self.config.eikonal_num_samples, 3, device=self.device)
+                    positions = torch.lerp(*self.field.aabb, positions)
+                    sdf_gradients = self.field.gradient(positions)
+                eikonal_loss = self._eikonal_loss(sdf_gradients)
                 eikonal_loss = eikonal_loss * self.config.eikonal_loss_mult
                 losses.update(eikonal_loss=eikonal_loss)
 
