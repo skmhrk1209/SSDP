@@ -41,9 +41,8 @@ def _create_trainer_config(
             eikonal_loss_mult=0.0,
             nll_color_loss_mult=0.0,
             nlml_color_loss_mult=1.0,
-            latent_prior_loss_mult=1.0e-1,
             field_prior_loss_mult=1.0e-2,
-            field_prior_scale_mult=1.0e-2,
+            latent_prior_loss_mult=1.0e-1,
         ),
     )
     trainer_config = dataclasses.replace(

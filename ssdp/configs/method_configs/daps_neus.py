@@ -43,7 +43,6 @@ def _create_trainer_config(
             nll_color_loss_mult=1.0,
             nlml_color_loss_mult=0.0,
             field_prior_loss_mult=1.0e-2,
-            field_prior_scale_mult=1.0e-4,
             anneal_end_step=source_trainer_config.max_num_iterations // 2,
         ),
     )
