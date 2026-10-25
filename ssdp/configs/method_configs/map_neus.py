@@ -43,6 +43,9 @@ def _create_trainer_config(
             eikonal_loss_mult=0.0,
             nll_color_loss_mult=1.0,
             nlml_color_loss_mult=0.0,
+            latent_prior_loss_mult=1.0e-1,
+            field_prior_loss_mult=1.0e-2,
+            field_prior_scale_mult=1.0e-2,
             anneal_end_step=source_trainer_config.max_num_iterations // 2,
         ),
     )
@@ -64,7 +67,7 @@ def _create_trainer_config(
             ),
             latent=dict(
                 optimizer=PSGHMCConfig(
-                    lr=1.0e-2,
+                    lr=1.0e-3,
                     temperature=0.0,
                 ),
                 scheduler=None,

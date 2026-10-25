@@ -1,12 +1,11 @@
 import dataclasses
 import enum
 import functools
+from collections.abc import Callable
 from typing import Any, override
 
 import jaxtyping as jt
 import torch
-from diso import DiffMC
-from kaolin.metrics.trianglemesh import point_to_mesh_distance
 
 from nerfstudio.engine.callbacks import (
     TrainingCallback,
@@ -16,6 +15,16 @@ from nerfstudio.engine.callbacks import (
 from ssdp.utils.jaxtyping import jaxtyped
 
 from .daps_mixin import DAPSMixin, DAPSMixinConfig
+
+
+@jaxtyped()
+def _straight_through(
+    function: Callable[[jt.Float[torch.Tensor, " *B "]], jt.Float[torch.Tensor, " *B "]],
+    inputs: jt.Float[torch.Tensor, " *B "],
+) -> jt.Float[torch.Tensor, " *B "]:
+    with torch.no_grad():
+        outputs = function(inputs)
+    return outputs + inputs - inputs.detach()
 
 
 class OptimizationPhase(enum.StrEnum):
@@ -32,38 +41,11 @@ class LatentInitSource(enum.StrEnum):
 class MAPMixinConfig(DAPSMixinConfig):
     num_steps_latent: int = 100
     latent_prior_loss_mult: float = 1.0
-    latent_init_source: LatentInitSource = LatentInitSource.FIELD
+    latent_init_source: LatentInitSource = LatentInitSource.PFODE
 
 
 class MAPMixin(DAPSMixin):
     config: MAPMixinConfig
-
-    @override
-    def populate_modules(self) -> None:
-        super().populate_modules()
-        self.marching_cubes = DiffMC(dtype=torch.float32)
-
-    @jaxtyped()
-    def _diff_redistance_sdf(
-        self,
-        sdf_grid: jt.Float[torch.Tensor, " D H W 1 "],
-    ) -> jt.Float[torch.Tensor, " D H W 1 "]:
-        if not self._has_zero_level(sdf_grid):
-            return sdf_grid
-        vertices, faces = self.marching_cubes(
-            grid=sdf_grid.squeeze(-1).float(),
-            normalize=True,
-        )
-        vertices = vertices.flip(-1)
-        vertices = self._denormalize_position(vertices)
-        squared_udf_values, _, _ = point_to_mesh_distance(
-            pointclouds=self.voxel_grid.flatten(0, -2).unsqueeze(0),
-            face_vertices=vertices[faces, ...].unsqueeze(0),
-        )
-        udf_values = torch.sqrt(torch.clamp(squared_udf_values, min=1.0e-6))
-        udf_grid = udf_values.reshape_as(sdf_grid)
-        sdf_grid = torch.sign(sdf_grid) * udf_grid
-        return sdf_grid
 
     @torch.no_grad()
     def _on_latent_phase_start(self, noise_level: jt.Float[torch.Tensor, " "]) -> None:
@@ -170,7 +152,7 @@ class MAPMixin(DAPSMixin):
             sdf = self.field.decode(self.field.latents)
             if self.config.redistance_sdf:
                 sdf_grid = self._discretize_sdf(sdf)
-                sdf_grid = self._diff_redistance_sdf(sdf_grid)
+                sdf_grid = _straight_through(self._redistance_sdf)(sdf_grid)
                 sdf = functools.partial(self._interpolate_sdf, sdf_grid)
                 sdf = self.field.transform(sdf)
             latent_sdf_values, positions = self._sample_sdf(sdf)

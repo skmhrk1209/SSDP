@@ -84,9 +84,7 @@ class LDMMixin(SDF):
 
     def field_parameters(self) -> Iterator[nn.Parameter]:
         yield from (
-            parameter
-            for name, parameter in self.named_parameters()
-            if name.startswith(("encoding", "glin"))
+            parameter for name, parameter in self.named_parameters() if name.startswith("glin")
         )
 
     def latent_parameters(self) -> Iterator[nn.Parameter]:

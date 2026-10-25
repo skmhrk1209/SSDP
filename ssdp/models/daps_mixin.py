@@ -30,7 +30,7 @@ class DAPSMixinConfig(SurfaceModelConfig):
     max_noise_level_anneal: float = 10.0
     min_noise_level_anneal: float = 0.1
     min_noise_level_pfode: float = 0.001
-    field_prior_scale_mult: float = 1.0e-4
+    field_prior_scale_mult: float = 1.0
     field_prior_loss_mult: float = 1.0
     sdf_num_samples: int = 100000
     sdf_resolution: int = 64
