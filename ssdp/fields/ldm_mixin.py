@@ -9,7 +9,6 @@ from typing import Any, Self, override
 import jaxtyping as jt
 import torch
 import torch.nn as nn
-import trimesh
 
 from nerfstudio.exporter.marching_cubes import generate_mesh_with_multires_marching_cubes
 from ssdp.priors.ldm import LDM, LDMConfig
@@ -30,6 +29,11 @@ class MCMCSpace(enum.StrEnum):
     LATENT = enum.auto()
 
 
+class EncoderOutMode(enum.StrEnum):
+    MEAN = enum.auto()
+    SAMPLE = enum.auto()
+
+
 @dataclasses.dataclass
 class LDMMixinConfig(SDFConfig):
     _target: type = dataclasses.field(
@@ -41,8 +45,8 @@ class LDMMixinConfig(SDFConfig):
     mcmc_space: MCMCSpace = MCMCSpace.FIELD
     latent_file: Path | None = None
     transform_file: Path | None = None
-    fit_transform: bool = False
     sdf_resolution: int = 512
+    encoder_out_mode: EncoderOutMode = EncoderOutMode.MEAN
 
 
 class LDMMixin(SDF):
@@ -101,37 +105,32 @@ class LDMMixin(SDF):
             not in {*ldm_parameter_ids, *field_parameter_ids, *latent_parameter_ids}
         )
 
-    def _fit_transform_to_mesh(self, mesh: trimesh.Trimesh) -> None:
-        raise NotImplementedError
-
-    def _fit_transform_to_sdf(self, sdf: SDFType) -> None:
-        raise NotImplementedError
-
     @torch.no_grad()
     def encode(self) -> jt.Float[torch.Tensor, " L C "]:
         if self.config.mcmc_space is MCMCSpace.LATENT:
             return self.latents
         elif self.config.mcmc_space is MCMCSpace.FIELD:
-            mesh = generate_mesh_with_multires_marching_cubes(
-                geometry_callable_field=lambda positions: self.sdf(positions).squeeze(-1),
-                resolution=self.config.sdf_resolution,
-                bounding_box_min=tuple(self.aabb[0].tolist()),
-                bounding_box_max=tuple(self.aabb[1].tolist()),
-            )
+            with torch.autocast(self.aabb.device.type, enabled=False):
+                mesh = generate_mesh_with_multires_marching_cubes(
+                    geometry_callable_field=lambda positions: self.sdf(positions).squeeze(-1),
+                    resolution=self.config.sdf_resolution,
+                    bounding_box_min=tuple(self.aabb[0].tolist()),
+                    bounding_box_max=tuple(self.aabb[1].tolist()),
+                )
             if mesh.is_empty:
                 return self.latents
-            if self.config.fit_transform:
-                self._fit_transform_to_mesh(mesh)
             mesh = self.transform.inverse()(mesh)
-            latents = self.ldm.encode(mesh)
+            latent_distribution = self.ldm.encode(mesh)
+            if self.config.encoder_out_mode is EncoderOutMode.MEAN:
+                latents = latent_distribution.mean
+            elif self.config.encoder_out_mode is EncoderOutMode.SAMPLE:
+                latents = latent_distribution.sample()
         return latents
 
     @jaxtyped()
     def decode(self, latents: jt.Float[torch.Tensor, " L C "] | None = None) -> SDFType:
         latents = self.latents if latents is None else latents
         sdf = self.ldm.decode(latents)
-        if self.config.fit_transform:
-            self._fit_transform_to_sdf(sdf)
         sdf = self.transform(sdf)
         return sdf
 

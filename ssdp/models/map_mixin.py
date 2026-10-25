@@ -20,11 +20,15 @@ from .daps_mixin import DAPSMixin, DAPSMixinConfig
 @jaxtyped()
 def _straight_through(
     function: Callable[[jt.Float[torch.Tensor, " *B "]], jt.Float[torch.Tensor, " *B "]],
-    inputs: jt.Float[torch.Tensor, " *B "],
-) -> jt.Float[torch.Tensor, " *B "]:
-    with torch.no_grad():
-        outputs = function(inputs)
-    return outputs + inputs - inputs.detach()
+) -> Callable[[jt.Float[torch.Tensor, " *B "]], jt.Float[torch.Tensor, " *B "]]:
+    @jaxtyped()
+    @functools.wraps(function)
+    def wrapper(inputs: jt.Float[torch.Tensor, " *B "]) -> jt.Float[torch.Tensor, " *B "]:
+        with torch.no_grad():
+            outputs = function(inputs)
+        return outputs + inputs - inputs.detach()
+
+    return wrapper
 
 
 class OptimizationPhase(enum.StrEnum):
@@ -32,7 +36,7 @@ class OptimizationPhase(enum.StrEnum):
     FIELD = enum.auto()
 
 
-class LatentInitSource(enum.StrEnum):
+class LatentInitMode(enum.StrEnum):
     FIELD = enum.auto()
     PFODE = enum.auto()
 
@@ -41,7 +45,7 @@ class LatentInitSource(enum.StrEnum):
 class MAPMixinConfig(DAPSMixinConfig):
     num_steps_latent: int = 100
     latent_prior_loss_mult: float = 1.0
-    latent_init_source: LatentInitSource = LatentInitSource.PFODE
+    latent_init_mode: LatentInitMode = LatentInitMode.PFODE
 
 
 class MAPMixin(DAPSMixin):
@@ -49,24 +53,31 @@ class MAPMixin(DAPSMixin):
 
     @torch.no_grad()
     def _on_latent_phase_start(self, noise_level: jt.Float[torch.Tensor, " "]) -> None:
-        self.noise_level = noise_level
-        self.denoised_latents = self.field.ldm.tweedie(
-            noisy_latents=self.field.latents,
-            noise_level=noise_level,
-        )
-        self.sdf_grid = self._discretize_sdf(self.field.sdf)
-        if self.config.redistance_sdf:
-            self.sdf_grid = self._redistance_sdf(self.sdf_grid)
         self.optimization_phase = OptimizationPhase.LATENT
+        self.noise_level = noise_level
+        with torch.autocast(self.device.type, getattr(torch, self.config.denoiser_dtype)):
+            denoised_latents = self.field.ldm.tweedie(
+                noisy_latents=self.field.latents,
+                noise_level=noise_level,
+            )
+            denoised_latents = denoised_latents.float()
+        self.denoised_latents = denoised_latents
+        sdf_grid = self._discretize_sdf(self.field.sdf)
+        if self.config.redistance_sdf:
+            sdf_grid = self._redistance_sdf(sdf_grid)
+        self.sdf_grid = sdf_grid
 
     @torch.no_grad()
     def _on_field_phase_start(self, noise_level: jt.Float[torch.Tensor, " "]) -> None:
-        self.noise_level = noise_level
-        sdf = self.field.decode(self.field.latents)
-        self.sdf_grid = self._discretize_sdf(sdf)
-        if self.config.redistance_sdf:
-            self.sdf_grid = self._redistance_sdf(self.sdf_grid)
         self.optimization_phase = OptimizationPhase.FIELD
+        self.noise_level = noise_level
+        with torch.autocast(self.device.type, getattr(torch, self.config.decoder_dtype)):
+            sdf = self.field.decode(self.field.latents)
+            sdf_grid = self._discretize_sdf(sdf)
+            sdf_grid = sdf_grid.float()
+        if self.config.redistance_sdf:
+            sdf_grid = self._redistance_sdf(sdf_grid)
+        self.sdf_grid = sdf_grid
 
     @override
     def get_training_callbacks(
@@ -86,21 +97,25 @@ class MAPMixin(DAPSMixin):
                 self.field.ldm.uncondition()
             else:
                 self.field.ldm.condition()
-            if self.config.latent_init_source is LatentInitSource.FIELD:
-                latents = self.field.encode()
+            if self.config.latent_init_mode is LatentInitMode.FIELD:
+                with torch.autocast(self.device.type, getattr(torch, self.config.encoder_dtype)):
+                    latents = self.field.encode()
+                    latents = latents.float()
                 self.field.latents.copy_(latents)
-            elif self.config.latent_init_source is LatentInitSource.PFODE:
+            elif self.config.latent_init_mode is LatentInitMode.PFODE:
                 noise_level = self.noise_levels[0, ...]
                 noisy_latents = self.field.ldm.forward_sde(
                     latents=self.field.latents,
                     noise_level=noise_level,
                 )
-                denoised_latents = self.field.ldm.reverse_pfode(
-                    noisy_latents=noisy_latents,
-                    max_noise_level=noise_level,
-                    min_noise_level=noise_level.new_tensor(self.config.min_noise_level_pfode),
-                    num_ode_steps=self.config.num_steps_pfode,
-                )
+                with torch.autocast(self.device.type, getattr(torch, self.config.denoiser_dtype)):
+                    denoised_latents = self.field.ldm.reverse_pfode(
+                        noisy_latents=noisy_latents,
+                        max_noise_level=noise_level,
+                        min_noise_level=noise_level.new_tensor(self.config.min_noise_level_pfode),
+                        num_ode_steps=self.config.num_steps_pfode,
+                    )
+                    denoised_latents = denoised_latents.float()
                 self.field.latents.copy_(denoised_latents)
 
         def on_latent_phase_start(step: int) -> None:
@@ -149,13 +164,20 @@ class MAPMixin(DAPSMixin):
     @jaxtyped()
     def _field_prior_loss(self) -> jt.Float[torch.Tensor, " "]:
         if self.optimization_phase is OptimizationPhase.LATENT:
-            sdf = self.field.decode(self.field.latents)
-            if self.config.redistance_sdf:
-                sdf_grid = self._discretize_sdf(sdf)
-                sdf_grid = _straight_through(self._redistance_sdf)(sdf_grid)
-                sdf = functools.partial(self._interpolate_sdf, sdf_grid)
-                sdf = self.field.transform(sdf)
-            latent_sdf_values, positions = self._sample_sdf(sdf)
+            with torch.autocast(self.device.type, getattr(torch, self.config.decoder_dtype)):
+                sdf = self.field.decode(self.field.latents)
+                if self.config.redistance_sdf:
+                    sdf_grid = self._discretize_sdf(sdf)
+                    sdf_grid = sdf_grid.float()
+                    with torch.autocast(self.device.type, enabled=False):
+                        sdf_grid = _straight_through(self._redistance_sdf)(sdf_grid)
+                        sdf = functools.partial(self._interpolate_sdf, sdf_grid)
+                        sdf = self.field.transform(sdf)
+                        latent_sdf_values, positions = self._sample_sdf(sdf)
+                else:
+                    latent_sdf_values, positions = self._sample_sdf(sdf)
+                    latent_sdf_values = latent_sdf_values.float()
+                    positions = positions.float()
             field_sdf_values = self._interpolate_sdf(self.sdf_grid, positions)
         elif self.optimization_phase is OptimizationPhase.FIELD:
             field_sdf_values, positions = self._sample_sdf(self.field.sdf)

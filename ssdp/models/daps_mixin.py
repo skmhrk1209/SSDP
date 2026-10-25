@@ -1,4 +1,5 @@
 import dataclasses
+import enum
 from collections.abc import Callable
 from typing import Any, override
 
@@ -23,6 +24,12 @@ type SDFType = Callable[
 ]
 
 
+class LDMDType(enum.StrEnum):
+    FLOAT32 = enum.auto()
+    FLOAT16 = enum.auto()
+    BFLOAT16 = enum.auto()
+
+
 @dataclasses.dataclass
 class DAPSMixinConfig(SurfaceModelConfig):
     num_steps_anneal: int = 100
@@ -36,6 +43,9 @@ class DAPSMixinConfig(SurfaceModelConfig):
     sdf_resolution: int = 64
     sdf_chunk_size: int = 1 << 18
     redistance_sdf: bool = True
+    denoiser_dtype: LDMDType = LDMDType.FLOAT16
+    encoder_dtype: LDMDType = LDMDType.FLOAT16
+    decoder_dtype: LDMDType = LDMDType.FLOAT16
 
 
 class DAPSMixin(SurfaceModel):
@@ -187,8 +197,8 @@ class DAPSMixin(SurfaceModel):
         voxel_sizes = voxel_sizes.flip(-1)
         sdf_grid = sdf_grid.squeeze(-1)
         sdf_grid = skfmm.distance(
-            phi=sdf_grid.double().cpu().numpy(),
-            dx=voxel_sizes.double().cpu().numpy(),
+            phi=sdf_grid.cpu().numpy(),
+            dx=voxel_sizes.cpu().numpy(),
             order=2,
         )
         sdf_grid = voxel_sizes.new_tensor(sdf_grid)
@@ -202,23 +212,31 @@ class DAPSMixin(SurfaceModel):
             latents=self.field.latents,
             noise_level=noise_level,
         )
-        self.denoised_latents = self.field.ldm.reverse_pfode(
-            noisy_latents=noisy_latents,
-            max_noise_level=noise_level,
-            min_noise_level=noise_level.new_tensor(self.config.min_noise_level_pfode),
-            num_ode_steps=self.config.num_steps_pfode,
-        )
-        self.field.latents.copy_(self.denoised_latents)
+        with torch.autocast(self.device.type, getattr(torch, self.config.denoiser_dtype)):
+            denoised_latents = self.field.ldm.reverse_pfode(
+                noisy_latents=noisy_latents,
+                max_noise_level=noise_level,
+                min_noise_level=noise_level.new_tensor(self.config.min_noise_level_pfode),
+                num_ode_steps=self.config.num_steps_pfode,
+            )
+            denoised_latents = denoised_latents.float()
+        self.denoised_latents = denoised_latents
+        self.field.latents.copy_(denoised_latents)
         if self.field.config.mcmc_space is MCMCSpace.FIELD:
-            sdf = self.field.decode(self.denoised_latents)
-            self.sdf_grid = self._discretize_sdf(sdf)
+            with torch.autocast(self.device.type, getattr(torch, self.config.decoder_dtype)):
+                sdf = self.field.decode(denoised_latents)
+                sdf_grid = self._discretize_sdf(sdf)
+                sdf_grid = sdf_grid.float()
             if self.config.redistance_sdf:
-                self.sdf_grid = self._redistance_sdf(self.sdf_grid)
+                sdf_grid = self._redistance_sdf(sdf_grid)
+            self.sdf_grid = sdf_grid
 
     @torch.no_grad()
     def _on_mcmc_end(self) -> None:
         if self.field.config.mcmc_space is MCMCSpace.FIELD:
-            latents = self.field.encode()
+            with torch.autocast(self.device.type, getattr(torch, self.config.encoder_dtype)):
+                latents = self.field.encode()
+                latents = latents.float()
             self.field.latents.copy_(latents)
 
     @override

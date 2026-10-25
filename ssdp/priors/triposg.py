@@ -1,6 +1,5 @@
 import contextlib
 import dataclasses
-import enum
 from collections.abc import Callable
 from pathlib import Path
 from typing import override
@@ -38,17 +37,6 @@ type SDFType = Callable[
 ]
 
 
-class EncoderOutputMode(enum.StrEnum):
-    MEAN = enum.auto()
-    SAMPLE = enum.auto()
-
-
-class TransformerDType(enum.StrEnum):
-    FLOAT32 = enum.auto()
-    FLOAT16 = enum.auto()
-    BFLOAT16 = enum.auto()
-
-
 @dataclasses.dataclass
 class TripoSGPriorConfig(LDMConfig):
     _target: type = dataclasses.field(
@@ -64,8 +52,6 @@ class TripoSGPriorConfig(LDMConfig):
     guidance_scale: float = 7.0
     # TODO: desctive the evidence
     distance_per_unit: float = 0.0043
-    encoder_output_mode: EncoderOutputMode = EncoderOutputMode.MEAN
-    transformer_dtype: TransformerDType = TransformerDType.FLOAT16
 
 
 class TripoSGPrior(LDM):
@@ -80,8 +66,8 @@ class TripoSGPrior(LDM):
         self.rmbg_model: BriaRMBG = BriaRMBG.from_pretrained(
             snapshot_download(self.config.rmbg_repo_id),
         )
+        self.denoiser: TripoSGDiTModel = self.pipeline.transformer
         self.auto_encoder: TripoSGVAEModel = self.pipeline.vae
-        self.transformer: TripoSGDiTModel = self.pipeline.transformer
         self.image_encoder: Dinov2Model = self.pipeline.image_encoder_dinov2
         self.image_processor: BitImageProcessor = self.pipeline.feature_extractor_dinov2
         self.image_embeddings = None
@@ -139,7 +125,7 @@ class TripoSGPrior(LDM):
         self,
         mesh: trimesh.Trimesh,
         seed: int | None = None,
-    ) -> jt.Float[torch.Tensor, " L C "]:
+    ) -> torch.distributions.Normal:
         mesh = self._slice_mesh(mesh)
         positions, face_indices = trimesh.sample.sample_surface(
             mesh=mesh,
@@ -158,16 +144,11 @@ class TripoSGPrior(LDM):
             num_tokens=self.config.num_latent_tokens,
             seed=seed,
         ).latent_dist
-        if self.config.encoder_output_mode is EncoderOutputMode.MEAN:
-            latents = latent_distribution.mode()
-        else:
-            generator = None
-            if seed is not None:
-                generator = torch.Generator(self.auto_encoder.device)
-                generator.manual_seed(seed)
-            latents = latent_distribution.sample(generator)
-        latents = latents.squeeze(0)
-        return latents
+        latent_distribution = torch.distributions.Normal(
+            loc=latent_distribution.mean.squeeze(0),
+            scale=latent_distribution.std.squeeze(0),
+        )
+        return latent_distribution
 
     @jaxtyped()
     def decode(
@@ -215,26 +196,21 @@ class TripoSGPrior(LDM):
 
         [timestep], _ = retrieve_timesteps(
             scheduler=self.pipeline.scheduler,
-            device=self.transformer.device,
+            device=self.denoiser.device,
             sigmas=noise_level.unsqueeze(0).cpu().numpy(),
         )
 
-        transformer_dtype = getattr(torch, self.config.transformer_dtype)
-        with torch.autocast(
-            device_type=self.transformer.device.type,
-            dtype=transformer_dtype,
-        ):
-            hidden_states = (
-                torch.cat([noisy_latents, noisy_latents], dim=0)
-                if self.already_conditioned
-                else noisy_latents
-            )
-            (velocities,) = self.transformer(
-                hidden_states=hidden_states,
-                encoder_hidden_states=self.image_embeddings,
-                timestep=timestep.expand(*hidden_states.shape[:1]),
-                return_dict=False,
-            )
+        hidden_states = (
+            torch.cat([noisy_latents, noisy_latents], dim=0)
+            if self.already_conditioned
+            else noisy_latents
+        )
+        (velocities,) = self.denoiser(
+            hidden_states=hidden_states,
+            encoder_hidden_states=self.image_embeddings,
+            timestep=timestep.expand(*hidden_states.shape[:1]),
+            return_dict=False,
+        )
 
         velocities = velocities.to(torch.float32)
 

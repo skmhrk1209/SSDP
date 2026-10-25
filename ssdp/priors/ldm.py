@@ -70,7 +70,7 @@ class LDM(nn.Module, abc.ABC):
     def uncondition(self) -> None: ...
 
     @abc.abstractmethod
-    def encode(self, mesh: trimesh.Trimesh) -> jt.Float[torch.Tensor, " L C "]: ...
+    def encode(self, mesh: trimesh.Trimesh) -> torch.distributions.Normal: ...
 
     @abc.abstractmethod
     def decode(
@@ -102,8 +102,6 @@ class LDM(nn.Module, abc.ABC):
         noise_level: jt.Float[torch.Tensor, " "],
         seed: int | None = None,
     ) -> jt.Float[torch.Tensor, " L C "]:
-        # NOTE: without a seed, the global RNG (seeded by the trainer) is used, so that every call
-        # draws fresh noise; a fresh `torch.Generator()` would start from the same default seed.
         generator = None
         if seed is not None:
             generator = torch.Generator(latents.device)
