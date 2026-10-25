@@ -117,10 +117,10 @@ class LDMMixin(SDF):
                     bounding_box_min=tuple(self.aabb[0].tolist()),
                     bounding_box_max=tuple(self.aabb[1].tolist()),
                 )
-            if mesh.is_empty:
-                return self.latents
             mesh = self.transform.inverse()(mesh)
             latent_distribution = self.ldm.encode(mesh)
+            if latent_distribution is None:
+                return self.latents
             if self.config.encoder_out_mode is EncoderOutMode.MEAN:
                 latents = latent_distribution.mean
             elif self.config.encoder_out_mode is EncoderOutMode.SAMPLE:

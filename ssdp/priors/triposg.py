@@ -125,8 +125,10 @@ class TripoSGPrior(LDM):
         self,
         mesh: trimesh.Trimesh,
         seed: int | None = None,
-    ) -> torch.distributions.Normal:
+    ) -> torch.distributions.Normal | None:
         mesh = self._slice_mesh(mesh)
+        if mesh.is_empty:
+            return None
         positions, face_indices = trimesh.sample.sample_surface(
             mesh=mesh,
             count=self.config.num_surface_points,
