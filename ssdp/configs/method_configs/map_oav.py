@@ -40,11 +40,11 @@ def _create_trainer_config(
             near_plane=0.0,
             far_plane=5.0,
             background_model="mlp",
-            eikonal_loss_mult=0.0,
+            eikonal_loss_mult=1.0e-2,
             nll_color_loss_mult=1.0,
             nlml_color_loss_mult=0.0,
-            field_prior_loss_mult=1.0e-2,
-            latent_prior_loss_mult=1.0e-1,
+            field_prior_loss_mult=1.0,
+            latent_prior_loss_mult=1.0e-4,
         ),
     )
     trainer_config = dataclasses.replace(

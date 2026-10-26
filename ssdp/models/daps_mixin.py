@@ -44,8 +44,8 @@ class DAPSMixinConfig(SurfaceModelConfig):
     sdf_chunk_size: int = 1 << 18
     redistance_sdf: bool = True
     denoiser_dtype: LDMDType = LDMDType.FLOAT16
-    encoder_dtype: LDMDType = LDMDType.FLOAT16
-    decoder_dtype: LDMDType = LDMDType.FLOAT16
+    encoder_dtype: LDMDType = LDMDType.FLOAT32
+    decoder_dtype: LDMDType = LDMDType.FLOAT32
 
 
 class DAPSMixin(SurfaceModel):

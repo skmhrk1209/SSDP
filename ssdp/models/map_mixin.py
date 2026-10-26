@@ -43,7 +43,7 @@ class LatentInitMode(enum.StrEnum):
 
 @dataclasses.dataclass
 class MAPMixinConfig(DAPSMixinConfig):
-    num_steps_latent: int = 100
+    num_steps_latent: int = 50
     latent_prior_loss_mult: float = 1.0
     latent_init_mode: LatentInitMode = LatentInitMode.PFODE
 
