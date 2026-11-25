@@ -1,0 +1,19 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    # Ruff version.
+    rev: v0.15.0
+    hooks:
+      # Run the linter.
+      - id: ruff-check
+        args: [ --fix ]
+      # Run the formatter.
+      - id: ruff-format
+  - repo: local
+    hooks:
+      - id: pyright
+        name: pyright
+        entry: uv run --no-sync pyright ssdp
+        language: system
+        types: [python]
+        stages: [pre-push]
+        pass_filenames: false

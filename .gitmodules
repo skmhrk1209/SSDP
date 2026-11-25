@@ -1,0 +1,6 @@
+[submodule "external/dtu_eval"]
+	path = external/dtu_eval
+	url = https://github.com/jzhangbs/DTUeval-python.git
+[submodule "external/lego_eval"]
+	path = external/lego_eval
+	url = https://github.com/ActiveVisionLab/MobileBrick.git

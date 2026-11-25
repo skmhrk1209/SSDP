@@ -1,0 +1,134 @@
+[project]
+name = "ssdp"
+version = "1.0.0"
+description = "SSDP: Stochastic Signed Distance Processes"
+readme = "README.md"
+authors = [
+    { name = "Hiroki Sakuma", email = "kmhskm0720@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "beartype>=0.23.1",
+    "jaxtyping>=0.3.11",
+    "kornia>=0.9.2",
+    "loguru>=0.8.0",
+    "mitsuba>=3.9.1",
+    "mpi4py>=4.1.2",
+    "nerfstudio==1.1.5",
+    "numpy>=2",
+    "rich<14",
+    "toolz>=1.2.0",
+    "torch==2.8.0",
+    "torchvision>=0.23.0",
+    "trimesh>=5.2.2",
+    "tyro>=1.0.17",
+]
+license = "MIT"
+license-files = ["LICENSE"]
+
+[dependency-groups]
+dev = [
+    "huggingface-hub>=2.4.0",
+    "pyright>=1.1.414",
+]
+ext = [
+    "tinycudann",
+]
+
+[tool.uv]
+default-groups = ["dev"]
+no-build-isolation-package = ["tinycudann"]
+environments = ["platform_machine != 'arm64'"]
+constraint-dependencies = [
+    "open3d<0.20", # open3d >= 0.20 requires glibc >= 2.35; TSUBAME 4 has 2.34
+]
+
+[tool.uv.sources]
+tinycudann = { git = "https://github.com/NVlabs/tiny-cuda-nn", subdirectory = "bindings/torch", tag = "v2.0" }
+
+[[tool.uv.dependency-metadata]]
+name = "tinycudann"
+version = "v2.0"
+requires-dist = ["setuptools<81"]
+
+[tool.setuptools.packages.find]
+include = ["ssdp*"]
+namespaces = false
+
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[tool.ruff]
+line-length = 99
+
+[tool.ruff.lint]
+# https://docs.astral.sh/ruff/linter/#rule-selection
+select = [
+    # pycodestyle
+    "E", "W",
+    # pyflakes
+    "F",
+    # pyupgrade
+    "UP",
+    # flake8-bugbear
+    "B",
+    # flake8-simplify
+    "SIM",
+    # isort
+    "I",
+    # pep8-naming
+    "N",
+    # flake8-annotations
+    "ANN",
+    # ruff
+    "RUF",
+]
+ignore = [
+  "E501",   # Line too long
+  # ↓ jaxtyping: https://docs.kidger.site/jaxtyping/faq/#flake8-or-ruff-are-throwing-an-error
+  "F722",   # Syntax error in forward annotation: Expected an expression 
+  "B020",   # Loop control variable `xxx` overrides iterable it iterates
+  "SIM102", # Use a single `if` statement instead of nested `if` statements
+  "N806",   # Variable `XXX` in function should be lowercase
+  "ANN401", # Dynamically typed expressions (typing.Any) are disallowed in ...
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["nerfstudio", "ssdp"]
+
+[tool.pyright]
+typeCheckingMode = "standard"
+reportIncompatibleMethodOverride = false
+reportIncompatibleVariableOverride = false
+
+[project.scripts]
+train = "ssdp.scripts.train:entrypoint"
+export = "ssdp.scripts.export:entrypoint"
+
+[project.entry-points."nerfstudio.method_configs"]
+
+neus = "ssdp.configs.method_configs.surface_models:neus"
+neus-facto = "ssdp.configs.method_configs.surface_models:neus_facto"
+
+oav = "ssdp.configs.method_configs.surface_models:oav"
+oav-facto = "ssdp.configs.method_configs.surface_models:oav_facto"
+
+unis-c0 = "ssdp.configs.method_configs.surface_models:unis_c0"
+unis-c0-facto = "ssdp.configs.method_configs.surface_models:unis_c0_facto"
+
+unis-c1 = "ssdp.configs.method_configs.surface_models:unis_c1"
+unis-c1-facto = "ssdp.configs.method_configs.surface_models:unis_c1_facto"
+
+unis-c2 = "ssdp.configs.method_configs.surface_models:unis_c2"
+unis-c2-facto = "ssdp.configs.method_configs.surface_models:unis_c2_facto"
+
+unis-c3 = "ssdp.configs.method_configs.surface_models:unis_c3"
+unis-c3-facto = "ssdp.configs.method_configs.surface_models:unis_c3_facto"
+
+ssdp = "ssdp.configs.method_configs.surface_models:ssdp"
+ssdp-facto = "ssdp.configs.method_configs.surface_models:ssdp_facto"
+
+[project.entry-points.'nerfstudio.dataparser_configs']
+
+custom-sdfstudio-data = 'ssdp.configs.dataparser_configs.sdfstudio_dataparsers:custom_sdfstudio_dataparser'
