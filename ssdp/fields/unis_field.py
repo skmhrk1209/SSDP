@@ -38,8 +38,9 @@ class _SoftplusAntiderivative(torch.autograd.Function):
     @staticmethod
     @functools.cache
     def _get_coefficients(dtype: torch.dtype) -> tuple[float, ...]:
-        # Each term cₙ vⁿ⁺¹ is largest at x = 0, where v = softplus(x) = log 2 and the sum is π² / 12.
-        # The spacing of `dtype` in [1 / 2, 1) is ε / 2, so terms below ε / 4 cannot change the sum.
+        # NOTE: Truncate the series in `_forward`.
+        # Each term cₙ f(x)ⁿ⁺¹ is largest at x = 0 over x ≤ 0, where f(0) = log 2 and F(0) = π² / 12.
+        # The spacing of `dtype` in [1 / 2, 1) is ε / 2, so adding a value below ε / 4 cannot change F(0).
         tolerance = torch.finfo(dtype).eps / 4.0
         coefficients = []
         for n, b_n in enumerate(_bernoulli_numbers()):
@@ -52,6 +53,9 @@ class _SoftplusAntiderivative(torch.autograd.Function):
     @staticmethod
     @jaxtyped()
     def _forward(inputs: jt.Float[torch.Tensor, " *B "]) -> jt.Float[torch.Tensor, " *B "]:
+        # NOTE: Compute the antiderivative F(x) = ∫₋∞ˣ f(t) dt of the softplus function f.
+        # For x ≤ 0, F(x) = Σₙ cₙ f(x)ⁿ⁺¹, where cₙ = bₙ (-1)ⁿ / (n + 1)! and bₙ is the n-th Bernoulli number.
+        # For x > 0, since f(x) - f(-x) = x, we use F(x) + F(-x) = x² / 2 + 2 F(0).
         outputs = nn.functional.softplus(-torch.abs(inputs))
         coefficients = _SoftplusAntiderivative._get_coefficients(inputs.dtype)
         outputs = functools.reduce(
