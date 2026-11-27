@@ -38,13 +38,13 @@ class _SoftplusAntiderivative(torch.autograd.Function):
     @staticmethod
     @functools.cache
     def _get_coefficients(dtype: torch.dtype) -> tuple[float, ...]:
-        # NOTE: Truncate the series in `_forward`.
-        # Each term cₙ f(x)ⁿ⁺¹ is largest at x = 0 over x ≤ 0, where f(0) = log 2 and F(0) = π² / 12.
+        # NOTE: Truncate the series F(x) = Σₙ cₙ f(x)ⁿ⁺¹ for x ≤ 0.
+        # Each term cₙ f(x)ⁿ⁺¹ is largest at x = 0, where f(0) = log 2 and F(0) = π² / 12.
         # The spacing of `dtype` in [1 / 2, 1) is ε / 2, so adding a value below ε / 4 cannot change F(0).
         tolerance = torch.finfo(dtype).eps / 4.0
         coefficients = []
-        for n, b_n in enumerate(_bernoulli_numbers()):
-            coefficient = b_n * (-1) ** n / math.factorial(n + 1)
+        for n, bernoulli_number in enumerate(_bernoulli_numbers()):
+            coefficient = bernoulli_number * (-1) ** n / math.factorial(n + 1)
             if coefficient and abs(coefficient) * math.log(2.0) ** (n + 1) < tolerance:
                 break
             coefficients.append(float(coefficient))
@@ -56,11 +56,15 @@ class _SoftplusAntiderivative(torch.autograd.Function):
         # NOTE: Compute the antiderivative F(x) = ∫₋∞ˣ f(t) dt of the softplus function f.
         # For x ≤ 0, F(x) = Σₙ cₙ f(x)ⁿ⁺¹, where cₙ = bₙ (-1)ⁿ / (n + 1)! and bₙ is the n-th Bernoulli number.
         # For x > 0, since f(x) - f(-x) = x, we use F(x) + F(-x) = x² / 2 + 2 F(0).
-        outputs = nn.functional.softplus(-torch.abs(inputs))
         coefficients = _SoftplusAntiderivative._get_coefficients(inputs.dtype)
+        outputs = nn.functional.softplus(-torch.abs(inputs))
         outputs = functools.reduce(
             operator.add,
-            (outputs ** (n + 1) * c_n for n, c_n in enumerate(coefficients) if c_n),
+            (
+                outputs ** (n + 1) * coefficient
+                for n, coefficient in enumerate(coefficients)
+                if coefficient
+            ),
         )
         outputs = torch.where(
             condition=inputs < 0.0,
