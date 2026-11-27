@@ -253,6 +253,7 @@ uv run python tools/evaluation/evaluate_uq_metrics.py \
 ## Checkpoints
 
 The checkpoints of the models reported in the paper are available on [Hugging Face Hub](https://huggingface.co/skmhrk1209/SSDP).
+They were produced with [v1.0.0](https://github.com/skmhrk1209/SSDP/tree/v1.0.0) of this repository.
 *Schedule* is the length of the training schedule relative to that of NeuS-Facto.
 
 <table>
@@ -270,34 +271,34 @@ The checkpoints of the models reported in the paper are available on [Hugging Fa
   <tr>
     <td align="center" rowspan="2">DTU</td>
     <td align="center">1x</td>
-    <td align="center"><a href="https://huggingface.co/skmhrk1209/SSDP/tree/main/dtu-1x/ssdp-facto">Link</a></td>
-    <td align="center"><a href="https://huggingface.co/skmhrk1209/SSDP/tree/main/dtu-1x/neus">Link</a></td>
-    <td align="center"><a href="https://huggingface.co/skmhrk1209/SSDP/tree/main/dtu-1x/neus-facto">Link</a></td>
-    <td align="center"><a href="https://huggingface.co/skmhrk1209/SSDP/tree/main/dtu-1x/oav-facto">Link</a></td>
-    <td align="center"><a href="https://huggingface.co/skmhrk1209/SSDP/tree/main/dtu-1x/unis-c1-facto">Link</a></td>
-    <td align="center"><a href="https://huggingface.co/skmhrk1209/SSDP/tree/main/dtu-1x/unis-c2-facto">Link</a></td>
-    <td align="center"><a href="https://huggingface.co/skmhrk1209/SSDP/tree/main/dtu-1x/unis-c3-facto">Link</a></td>
+    <td align="center"><a href="https://huggingface.co/skmhrk1209/SSDP/tree/v1.0.0/dtu-1x/ssdp-facto">Link</a></td>
+    <td align="center"><a href="https://huggingface.co/skmhrk1209/SSDP/tree/v1.0.0/dtu-1x/neus">Link</a></td>
+    <td align="center"><a href="https://huggingface.co/skmhrk1209/SSDP/tree/v1.0.0/dtu-1x/neus-facto">Link</a></td>
+    <td align="center"><a href="https://huggingface.co/skmhrk1209/SSDP/tree/v1.0.0/dtu-1x/oav-facto">Link</a></td>
+    <td align="center"><a href="https://huggingface.co/skmhrk1209/SSDP/tree/v1.0.0/dtu-1x/unis-c1-facto">Link</a></td>
+    <td align="center"><a href="https://huggingface.co/skmhrk1209/SSDP/tree/v1.0.0/dtu-1x/unis-c2-facto">Link</a></td>
+    <td align="center"><a href="https://huggingface.co/skmhrk1209/SSDP/tree/v1.0.0/dtu-1x/unis-c3-facto">Link</a></td>
   </tr>
   <tr>
     <td align="center">4x</td>
-    <td align="center"><a href="https://huggingface.co/skmhrk1209/SSDP/tree/main/dtu-4x/ssdp-facto">Link</a></td>
-    <td align="center"><a href="https://huggingface.co/skmhrk1209/SSDP/tree/main/dtu-4x/neus">Link</a></td>
-    <td align="center"><a href="https://huggingface.co/skmhrk1209/SSDP/tree/main/dtu-4x/neus-facto">Link</a></td>
-    <td align="center"><a href="https://huggingface.co/skmhrk1209/SSDP/tree/main/dtu-4x/oav-facto">Link</a></td>
-    <td align="center"><a href="https://huggingface.co/skmhrk1209/SSDP/tree/main/dtu-4x/unis-c1-facto">Link</a></td>
-    <td align="center"><a href="https://huggingface.co/skmhrk1209/SSDP/tree/main/dtu-4x/unis-c2-facto">Link</a></td>
-    <td align="center"><a href="https://huggingface.co/skmhrk1209/SSDP/tree/main/dtu-4x/unis-c3-facto">Link</a></td>
+    <td align="center"><a href="https://huggingface.co/skmhrk1209/SSDP/tree/v1.0.0/dtu-4x/ssdp-facto">Link</a></td>
+    <td align="center"><a href="https://huggingface.co/skmhrk1209/SSDP/tree/v1.0.0/dtu-4x/neus">Link</a></td>
+    <td align="center"><a href="https://huggingface.co/skmhrk1209/SSDP/tree/v1.0.0/dtu-4x/neus-facto">Link</a></td>
+    <td align="center"><a href="https://huggingface.co/skmhrk1209/SSDP/tree/v1.0.0/dtu-4x/oav-facto">Link</a></td>
+    <td align="center"><a href="https://huggingface.co/skmhrk1209/SSDP/tree/v1.0.0/dtu-4x/unis-c1-facto">Link</a></td>
+    <td align="center"><a href="https://huggingface.co/skmhrk1209/SSDP/tree/v1.0.0/dtu-4x/unis-c2-facto">Link</a></td>
+    <td align="center"><a href="https://huggingface.co/skmhrk1209/SSDP/tree/v1.0.0/dtu-4x/unis-c3-facto">Link</a></td>
   </tr>
   <tr>
     <td align="center">MobileBrick</td>
     <td align="center">1x</td>
-    <td align="center"><a href="https://huggingface.co/skmhrk1209/SSDP/tree/main/lego-1x/ssdp-facto">Link</a></td>
-    <td align="center"><a href="https://huggingface.co/skmhrk1209/SSDP/tree/main/lego-1x/neus">Link</a></td>
-    <td align="center"><a href="https://huggingface.co/skmhrk1209/SSDP/tree/main/lego-1x/neus-facto">Link</a></td>
-    <td align="center"><a href="https://huggingface.co/skmhrk1209/SSDP/tree/main/lego-1x/oav-facto">Link</a></td>
-    <td align="center"><a href="https://huggingface.co/skmhrk1209/SSDP/tree/main/lego-1x/unis-c1-facto">Link</a></td>
-    <td align="center"><a href="https://huggingface.co/skmhrk1209/SSDP/tree/main/lego-1x/unis-c2-facto">Link</a></td>
-    <td align="center"><a href="https://huggingface.co/skmhrk1209/SSDP/tree/main/lego-1x/unis-c3-facto">Link</a></td>
+    <td align="center"><a href="https://huggingface.co/skmhrk1209/SSDP/tree/v1.0.0/lego-1x/ssdp-facto">Link</a></td>
+    <td align="center"><a href="https://huggingface.co/skmhrk1209/SSDP/tree/v1.0.0/lego-1x/neus">Link</a></td>
+    <td align="center"><a href="https://huggingface.co/skmhrk1209/SSDP/tree/v1.0.0/lego-1x/neus-facto">Link</a></td>
+    <td align="center"><a href="https://huggingface.co/skmhrk1209/SSDP/tree/v1.0.0/lego-1x/oav-facto">Link</a></td>
+    <td align="center"><a href="https://huggingface.co/skmhrk1209/SSDP/tree/v1.0.0/lego-1x/unis-c1-facto">Link</a></td>
+    <td align="center"><a href="https://huggingface.co/skmhrk1209/SSDP/tree/v1.0.0/lego-1x/unis-c2-facto">Link</a></td>
+    <td align="center"><a href="https://huggingface.co/skmhrk1209/SSDP/tree/v1.0.0/lego-1x/unis-c3-facto">Link</a></td>
   </tr>
 </table>
 
@@ -308,6 +309,7 @@ They are organized in the same way as in [Training](#training), where `PROJECT_N
 
 ```bash
 uv run hf download skmhrk1209/SSDP \
+    --revision=v1.0.0 \
     --include="${PROJECT_NAME}/${MODEL_NAME}/${EXPERIMENT_NAME}/*" \
     --local-dir=${OUTPUT_DIR}
 ```
