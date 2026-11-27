@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+import dataclasses
 from pathlib import Path
 
 import loguru
@@ -9,7 +9,7 @@ from nerfstudio.utils.eval_utils import eval_setup
 from ssdp.models import NeuSModel
 
 
-@dataclass
+@dataclasses.dataclass
 class MarchingCubesExporter:
     config_file: Path
     output_file: Path

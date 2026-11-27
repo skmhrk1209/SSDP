@@ -655,10 +655,14 @@ class NeuSModel(NeuSFactoModel):
     ) -> tuple[dict[str, float], dict[str, torch.Tensor]]:
         match self.config.sampler_type:
             case SamplerType.PROPOSAL:
-                metrics, images = super().get_image_metrics_and_images(outputs, inputs)
+                metrics, images = super().get_image_metrics_and_images(
+                    outputs=outputs,
+                    batch=inputs,
+                )
             case SamplerType.NEUS | SamplerType.UNIFORM:
                 metrics, images = super(NeuSFactoModel, self).get_image_metrics_and_images(
-                    outputs, inputs
+                    outputs=outputs,
+                    batch=inputs,
                 )
         if self.config.render_surface_images:
             surface_images = self._render_surface_images(outputs)

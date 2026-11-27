@@ -32,7 +32,9 @@ class CustomSDFDataset(SDFDataset):
 
     @override
     def get_data(
-        self, image_index: int, image_dtype: ImageDType = ImageDType.FLOAT32
+        self,
+        image_index: int,
+        image_dtype: ImageDType = ImageDType.FLOAT32,
     ) -> dict[str, Any]:
         match image_dtype:
             case ImageDType.FLOAT32:
