@@ -816,8 +816,8 @@ class MeshRenderer:
             output_file.parent.mkdir(parents=True, exist_ok=True)
             image.write(str(output_file))
 
-            extrinsic_matrix = sensor.m_to_world.matrix.numpy().squeeze(-1)
-            extrinsic_matrix = extrinsic_matrix @ np.diag([-1.0, -1.0, 1.0, 1.0])
+            pose_matrix = sensor.m_to_world.matrix.numpy().squeeze(-1)
+            pose_matrix = pose_matrix @ np.diag([-1.0, -1.0, 1.0, 1.0])
 
             [sensor] = scene.sensors()
             width, height = sensor.film().size()
@@ -828,7 +828,7 @@ class MeshRenderer:
 
             frame = dict(
                 rgb_path=str(output_file.relative_to(self.output_dir)),
-                camtoworld=extrinsic_matrix.tolist(),
+                camtoworld=pose_matrix.tolist(),
                 intrinsics=intrinsic_matrix.tolist(),
             )
             frames.append(frame)

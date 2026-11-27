@@ -1,6 +1,5 @@
 import dataclasses
 import enum
-from dataclasses import dataclass
 from typing import Any, override
 
 from nerfstudio.data.dataparsers.base_dataparser import DataparserOutputs
@@ -19,7 +18,7 @@ class CustomSDFStudioDataParserConfig(SDFStudioDataParserConfig):
     _target: type = dataclasses.field(default_factory=lambda: CustomSDFStudioDataParser)
 
 
-@dataclass
+@dataclasses.dataclass
 class CustomSDFStudioDataParser(SDFStudio):
     config: CustomSDFStudioDataParserConfig
 
@@ -30,14 +29,14 @@ class CustomSDFStudioDataParser(SDFStudio):
         if not self.config.include_foreground_mask:
             return dataparser_outputs
 
-        meta: dict[str, Any] = load_from_json(self.config.data / "meta_data.json")
-        assert meta["has_foreground_mask"], f"No foreground masks in <{self.config.data}>."
+        meta_data: dict[str, Any] = load_from_json(self.config.data / "meta_data.json")
+        assert meta_data["has_foreground_mask"], f"No foreground masks in <{self.config.data}>."
 
-        frame_indices = list(range(len(meta["frames"])))
+        frame_indices = list(range(len(meta_data["frames"])))
         if split == Split.VAL and self.config.skip_every_for_val_split >= 1:
             frame_indices = frame_indices[:: self.config.skip_every_for_val_split]
 
-        frames: list[dict[str, Any]] = meta["frames"]
+        frames: list[dict[str, Any]] = meta_data["frames"]
 
         mask_filenames = []
 
